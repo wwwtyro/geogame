@@ -6,6 +6,7 @@ const mat4 = require('gl-matrix').mat4;
 const vec3 = require('gl-matrix').vec3;
 const Trackball = require('trackball-controller');
 const Box = require('geo-3d-box');
+const normals = require('normals');
 
 
 main();
@@ -14,7 +15,8 @@ const texres = 512;
 
 async function main() {
 
-  const img = await loadImage('elevation.png');
+  const elevation_img = await loadImage('elevation.png');
+  const color_img = await loadImage('earthcolor.jpg');
 
   const elevation = (function() {
     const w = texres * 4;
@@ -23,7 +25,7 @@ async function main() {
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, w, h);
+    ctx.drawImage(elevation_img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
 
     const pi = Math.PI;
@@ -40,6 +42,36 @@ async function main() {
       const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
       const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
       return data[(j * w + i) * 4 + 0]; // +0 for red, +1 for green, etc...
+    }
+  })();
+
+  const color = (function() {
+    const w = texres * 4;
+    const h = texres * 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(color_img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const pi = Math.PI;
+    const twopi = pi * 2;
+
+    return function(p) {
+      p = vec3.normalize([], p);
+      const y = p[0];
+      const z = p[1]
+      const x = p[2];
+      const theta = Math.acos(z);
+      const phi = Math.atan2(y,x);
+      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
+      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
+      return [
+        data[(j * w + i) * 4 + 0]/255,
+        data[(j * w + i) * 4 + 1]/255,
+        data[(j * w + i) * 4 + 2]/255,
+      ];
     }
   })();
 
@@ -67,32 +99,44 @@ async function main() {
   for (let i = 0; i < box.positions.length; i++) {
     const d = 0.05 * elevation(box.positions[i])/255;
     box.positions[i] = vec3.scale([], vec3.normalize([], box.positions[i]), d + 1.0);
-    box.colors.push(d/0.05);
+    box.colors.push(color(box.positions[i]));
   }
+
+  box.normals = normals.vertexNormals(box.cells, box.positions, 0);
 
   const render = regl({
     vert: `
       precision highp float;
       attribute vec3 position;
-      attribute float color;
+      attribute vec3 color;
+      attribute vec3 normal;
       uniform mat4 model, view, projection;
-      varying float vColor;
+      varying vec3 vColor, vNormal;
+      varying float vHeight;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
+        vNormal = vec3(model * vec4(normal, 1));
         vColor = color;
+        vHeight = length(position);
       }
     `,
     frag: `
       precision highp float;
-      varying float vColor;
+      varying vec3 vColor, vNormal;
+      varying float vHeight;
       void main() {
-        float c = vColor;
-        gl_FragColor = vec4(c,c,c, 1.0);
+        float d = clamp(dot(normalize(vNormal), normalize(vec3(1,1,2))), 0.0, 1.0);
+        float i = 0.0;
+        if (vHeight < 1.000001) {
+          i = clamp(dot(normalize(vNormal), normalize(vec3(1,1,2))), 0.0, 1.0);
+        }
+        gl_FragColor = vec4(vColor * d + pow(i, 8.0) * 0.5, 1.0);
       }
     `,
     attributes: {
       position: box.positions,
       color: box.colors,
+      normal: box.normals,
     },
     uniforms: {
       model: regl.prop('model'),
@@ -143,7 +187,7 @@ function clamp(n, min, max) {
   return Math.min(Math.max(n, min), max);
 }
 
-},{"geo-3d-box":2,"gl-matrix":27,"regl":28,"trackball-controller":29}],2:[function(require,module,exports){
+},{"geo-3d-box":2,"gl-matrix":27,"normals":28,"regl":29,"trackball-controller":30}],2:[function(require,module,exports){
 function _createConfig( properties ) {
 	
 	var config = {
@@ -8246,6 +8290,131 @@ var forEach = exports.forEach = function () {
 /******/ ]);
 });
 },{}],28:[function(require,module,exports){
+var DEFAULT_NORMALS_EPSILON = 1e-6;
+var DEFAULT_FACE_EPSILON = 1e-6;
+
+//Estimate the vertex normals of a mesh
+exports.vertexNormals = function(faces, positions, specifiedEpsilon) {
+
+  var N         = positions.length;
+  var normals   = new Array(N);
+  var epsilon   = specifiedEpsilon === void(0) ? DEFAULT_NORMALS_EPSILON : specifiedEpsilon;
+
+  //Initialize normal array
+  for(var i=0; i<N; ++i) {
+    normals[i] = [0.0, 0.0, 0.0];
+  }
+
+  //Walk over all the faces and add per-vertex contribution to normal weights
+  for(var i=0; i<faces.length; ++i) {
+    var f = faces[i];
+    var p = 0;
+    var c = f[f.length-1];
+    var n = f[0];
+    for(var j=0; j<f.length; ++j) {
+
+      //Shift indices back
+      p = c;
+      c = n;
+      n = f[(j+1) % f.length];
+
+      var v0 = positions[p];
+      var v1 = positions[c];
+      var v2 = positions[n];
+
+      //Compute infineteismal arcs
+      var d01 = new Array(3);
+      var m01 = 0.0;
+      var d21 = new Array(3);
+      var m21 = 0.0;
+      for(var k=0; k<3; ++k) {
+        d01[k] = v0[k]  - v1[k];
+        m01   += d01[k] * d01[k];
+        d21[k] = v2[k]  - v1[k];
+        m21   += d21[k] * d21[k];
+      }
+
+      //Accumulate values in normal
+      if(m01 * m21 > epsilon) {
+        var norm = normals[c];
+        var w = 1.0 / Math.sqrt(m01 * m21);
+        for(var k=0; k<3; ++k) {
+          var u = (k+1)%3;
+          var v = (k+2)%3;
+          norm[k] += w * (d21[u] * d01[v] - d21[v] * d01[u]);
+        }
+      }
+    }
+  }
+
+  //Scale all normals to unit length
+  for(var i=0; i<N; ++i) {
+    var norm = normals[i];
+    var m = 0.0;
+    for(var k=0; k<3; ++k) {
+      m += norm[k] * norm[k];
+    }
+    if(m > epsilon) {
+      var w = 1.0 / Math.sqrt(m);
+      for(var k=0; k<3; ++k) {
+        norm[k] *= w;
+      }
+    } else {
+      for(var k=0; k<3; ++k) {
+        norm[k] = 0.0;
+      }
+    }
+  }
+
+  //Return the resulting set of patches
+  return normals;
+}
+
+//Compute face normals of a mesh
+exports.faceNormals = function(faces, positions, specifiedEpsilon) {
+
+  var N         = faces.length;
+  var normals   = new Array(N);
+  var epsilon   = specifiedEpsilon === void(0) ? DEFAULT_FACE_EPSILON : specifiedEpsilon;
+
+  for(var i=0; i<N; ++i) {
+    var f = faces[i];
+    var pos = new Array(3);
+    for(var j=0; j<3; ++j) {
+      pos[j] = positions[f[j]];
+    }
+
+    var d01 = new Array(3);
+    var d21 = new Array(3);
+    for(var j=0; j<3; ++j) {
+      d01[j] = pos[1][j] - pos[0][j];
+      d21[j] = pos[2][j] - pos[0][j];
+    }
+
+    var n = new Array(3);
+    var l = 0.0;
+    for(var j=0; j<3; ++j) {
+      var u = (j+1)%3;
+      var v = (j+2)%3;
+      n[j] = d01[u] * d21[v] - d01[v] * d21[u];
+      l += n[j] * n[j];
+    }
+    if(l > epsilon) {
+      l = 1.0 / Math.sqrt(l);
+    } else {
+      l = 0.0;
+    }
+    for(var j=0; j<3; ++j) {
+      n[j] *= l;
+    }
+    normals[i] = n;
+  }
+  return normals;
+}
+
+
+
+},{}],29:[function(require,module,exports){
 (function (global, factory) {
 	typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
 	typeof define === 'function' && define.amd ? define(factory) :
@@ -17750,7 +17919,7 @@ return wrapREGL;
 })));
 
 
-},{}],29:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 
 var mat4 = require('gl-mat4');
 
