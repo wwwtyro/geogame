@@ -15,7 +15,7 @@ const texres = 512;
 async function main() {
 
   const elevation_img = await loadImage('elevation.png');
-  const color_img = await loadImage('earthcolor.jpg');
+  const color_img = await loadImage('earthcolor.png');
 
   const elevation = (function() {
     const w = texres * 4;
