@@ -8,15 +8,18 @@ const Trackball = require('trackball-controller');
 const Box = require('geo-3d-box');
 const normals = require('normals');
 
-
 main();
 
 const texres = 512;
 
 async function main() {
 
+  const steps = 5;
+
+  progress(0/steps, 'Loading elevation data...');
+  await display();
+
   const elevation_img = await loadImage('elevation.png');
-  const color_img = await loadImage('earthcolor.png');
 
   const elevation = (function() {
     const w = texres * 4;
@@ -45,6 +48,11 @@ async function main() {
     }
   })();
 
+  progress(1/steps, 'Loading topographical data...');
+  await display();
+
+  const color_img = await loadImage('earthcolor.png');
+
   const color = (function() {
     const w = texres * 4;
     const h = texres * 2;
@@ -58,8 +66,9 @@ async function main() {
     const pi = Math.PI;
     const twopi = pi * 2;
 
+    const temp = [];
     return function(p) {
-      p = vec3.normalize([], p);
+      p = vec3.normalize(temp, p);
       const y = p[0];
       const z = p[1]
       const x = p[2];
@@ -79,30 +88,41 @@ async function main() {
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
 
-  var trackball = new Trackball(canvas, {
-    onRotate: loop,
-    drag: 0.01
-  });
-  trackball.spin(13,0);
-
   const regl = REGL({
     canvas: canvas,
     extensions: ['OES_element_index_uint']
   });
+
+  progress(2/steps, 'Generating quadsphere...');
+  await display();
+  await display();
 
   const box = Box({
     size: [1,1,1],
     segments: [texres,texres,texres]
   });
 
+  progress(3/steps, 'Mapping data to quadsphere...');
+  await display();
+
   box.colors = [];
+  const temp = [];
   for (let i = 0; i < box.positions.length; i++) {
     const d = 0.05 * elevation(box.positions[i])/255;
-    box.positions[i] = vec3.scale([], vec3.normalize([], box.positions[i]), d + 1.0);
+    box.positions[i] = vec3.scale([], vec3.normalize(temp, box.positions[i]), d + 1.0);
     box.colors.push(color(box.positions[i]));
   }
 
+  progress(4/steps, 'Calculating normals...');
+  await display();
+
   box.normals = normals.vertexNormals(box.cells, box.positions, 0);
+
+  progress(steps/steps, '');
+  await display();
+
+  progress(0, 'Click and drag to rotate.');
+  await display();
 
   const render = regl({
     vert: `
@@ -147,6 +167,12 @@ async function main() {
     elements: box.cells,
   });
 
+  var trackball = new Trackball(canvas, {
+    onRotate: loop,
+    drag: 0.01
+  });
+  trackball.spin(13,0);
+
   function loop() {
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
@@ -185,6 +211,27 @@ function loadImage(src) {
 
 function clamp(n, min, max) {
   return Math.min(Math.max(n, min), max);
+}
+
+function display() {
+  return new Promise(resolve => {
+    requestAnimationFrame(resolve);
+  });
+}
+
+function progress(fraction, info) {
+  const pdiv = document.getElementById('progress');
+  const idiv = document.getElementById('info');
+  pdiv.style.display = 'block';
+  if (fraction === 0) {
+    pdiv.style.display = 'none';
+  }
+  idiv.style.display = 'block';
+  if (info === '') {
+    idiv.style.display = 'none';
+  }
+  idiv.innerText = info;
+  pdiv.style.width = Math.round(fraction * 100) + '%';
 }
 
 },{"geo-3d-box":2,"gl-matrix":27,"normals":28,"regl":29,"trackball-controller":30}],2:[function(require,module,exports){
