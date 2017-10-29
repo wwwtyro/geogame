@@ -190,9 +190,10 @@ async function main() {
       bc.push([0,0,1]);
     }
     return {
-      positions: positions,
-      colors: colors,
-      bc: bc,
+      positions: regl.buffer(positions),
+      colors: regl.buffer(colors),
+      bc: regl.buffer(bc),
+      count: positions.length,
     }
   }
 
@@ -361,7 +362,7 @@ async function main() {
         positions: mesh.positions,
         colors: mesh.colors,
         bc: mesh.bc,
-        count: mesh.positions.length
+        count: mesh.count
       });
     }
 
