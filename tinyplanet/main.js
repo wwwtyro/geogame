@@ -245,6 +245,24 @@ async function main() {
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
 
+  function handleMouseMove(e) {
+    cam.lookUp(e.movementY * -0.001);
+    cam.lookRight(e.movementX * 0.001);
+  };
+
+  document.addEventListener('pointerlockchange', function() {
+    if (document.pointerLockElement === canvas) {
+      canvas.addEventListener('mousemove', handleMouseMove);
+      document.getElementById('info').style.display = 'none';
+    } else {
+      canvas.removeEventListener('mousemove', handleMouseMove);
+    }
+  });
+
+  canvas.addEventListener('click', function() {
+    canvas.requestPointerLock();
+  });
+
   const regl = REGL({
     canvas: canvas,
   });
@@ -313,7 +331,6 @@ async function main() {
     position: [0,elevation([0,1,0]) + 10 + earthRadius,0],
     forward: [0,0,-1]
   };
-  console.log(camData);
   const cam = SphereFPSCam(camData.position, camData.forward);
   cam.lookUp(-0.25);
   cam.lookRight(12);
@@ -332,18 +349,18 @@ async function main() {
 
   window.addEventListener('keydown', function(e) {
     if (e.which === 16) arrows.shift = true;
-    if (e.which === 38) arrows.up = true;
-    if (e.which === 40) arrows.down = true;
-    if (e.which === 37) arrows.left = true;
-    if (e.which === 39) arrows.right = true;
+    if (e.which === 87) arrows.up = true;
+    if (e.which === 83) arrows.down = true;
+    if (e.which === 65) arrows.left = true;
+    if (e.which === 68) arrows.right = true;
   });
 
   window.addEventListener('keyup', function(e) {
     if (e.which === 16) arrows.shift = false;
-    if (e.which === 38) arrows.up = false;
-    if (e.which === 40) arrows.down = false;
-    if (e.which === 37) arrows.left = false;
-    if (e.which === 39) arrows.right = false;
+    if (e.which === 87) arrows.up = false;
+    if (e.which === 83) arrows.down = false;
+    if (e.which === 65) arrows.left = false;
+    if (e.which === 68) arrows.right = false;
   });
 
 
@@ -366,11 +383,11 @@ async function main() {
     }
 
     if (arrows.left) {
-      cam.lookRight(-0.01 * speed);
+      cam.moveRight(-4000 * speed);
     }
 
     if (arrows.right) {
-      cam.lookRight(0.01 * speed);
+      cam.moveRight(4000 * speed);
     }
 
     let e = 100000 + earthRadius + elevation(cam.getPosition());
@@ -489,6 +506,11 @@ function SphereFPSCam(position, forward) {
     normalize();
   }
 
+  function moveRight(delta) {
+    vec3.add(position, position, vec3.scale([], right, delta));
+    normalize();
+  }
+
   function getView() {
     normalize();
     const rotAroundRight = mat4.rotate([], mat4.create(), phi, right);
@@ -508,6 +530,7 @@ function SphereFPSCam(position, forward) {
     lookUp: lookUp,
     moveForward: moveForward,
     moveUp: moveUp,
+    moveRight: moveRight,
     dump: dump,
   }
 
