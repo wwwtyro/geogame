@@ -8,11 +8,13 @@ const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
 
 
-const meter = 1.568e-7;
+const earthRadius = 6371000; // meters
 
 main();
 
 async function main() {
+
+  const texture_img = await loadImage('texture.png');
 
   const elevation_img = await loadImage('elevation.png');
 
@@ -38,11 +40,11 @@ async function main() {
       const phi = Math.atan2(y,x);
       const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
       const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
-      return meter * 32 * 8850 * data[(j * w + i) * 4 + 0]/255; // +0 for red, +1 for green, etc...
+      return 32 * 8850 * data[(j * w + i) * 4 + 0]/255; // +0 for red, +1 for green, etc...
     }
   })();
 
-  const color_img = await loadImage('earthcolor.png');
+  const color_img = await loadImage('earthcolor.jpg');
 
   const color = (function() {
     const w = color_img.width;
@@ -121,8 +123,11 @@ async function main() {
     const nodes = [];
     for (let root of sphere) {
       quadtree.traverse(root, function(node, depth) {
-        const radius = vec3.distance(vec3.normalize([], node.c), vec3.normalize([], node.se));
-        const dist = vec3.distance(p, vec3.normalize([], node.c));
+        const radius = vec3.distance(
+          vec3.scale([], vec3.normalize([], node.c), earthRadius),
+          vec3.scale([], vec3.normalize([], node.se), earthRadius)
+        );
+        const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
         if (dist > radius * 8) {
           return false;
         }
@@ -142,8 +147,7 @@ async function main() {
 
   function getVertex(p) {
     if (!(p in vertexCache)) {
-      vertexCache[p] = vec3.scale([], vec3.normalize([], p), elevation(p) + 1);
-      // vertexCache[p] = vec3.scale([], vec3.normalize([], p), 1 + 10000 * meter * (2 * Math.random() - 1));
+      vertexCache[p] = vec3.scale([], vec3.normalize([], p), elevation(p) + earthRadius);
     }
     return vertexCache[p].slice();
   }
@@ -152,17 +156,16 @@ async function main() {
   function getColor(p) {
     if (!(p in colorCache)) {
       colorCache[p] = color(p);
-      // vertexCache[p] = vec3.scale([], vec3.normalize([], p), 1 + 10000 * meter * (2 * Math.random() - 1));
     }
     return colorCache[p].slice();
   }
 
 
   function buildMesh(node) {
-    const res = 8;
+    const res = 8; // 256/3 appears to be the native resolution for depth=5 ;
     const right = vec3.scale([], node.right, 2/res);
     const up = vec3.scale([], node.up, 2/res);
-    const positions = [], colors = [];
+    const positions = [], colors = [], normals = [], uvs = [];
     for (let i = 0; i < res; i++) {
       for (let j = 0; j < res; j++) {
         let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
@@ -175,12 +178,44 @@ async function main() {
         positions.push(getVertex(a));
         positions.push(getVertex(c));
         positions.push(getVertex(d));
-        colors.push(getColor(a));
-        colors.push(getColor(b));
-        colors.push(getColor(c));
-        colors.push(getColor(a));
-        colors.push(getColor(c));
-        colors.push(getColor(d));
+
+        let ab = vec3.normalize([], vec3.sub([], getVertex(b), getVertex(a)));
+        let ac = vec3.normalize([], vec3.sub([], getVertex(c), getVertex(a)));
+        let n = vec3.cross([], ab, ac);
+        normals.push(n);
+        normals.push(n);
+        normals.push(n);
+
+        let ad = vec3.normalize([], vec3.sub([], getVertex(d), getVertex(a)));
+        n = vec3.cross([], ac, ad);
+        normals.push(n);
+        normals.push(n);
+        normals.push(n);
+
+        const uva = [(i + 0) / res, (j + 0) / res];
+        const uvb = [(i + 1) / res, (j + 0) / res];
+        const uvc = [(i + 1) / res, (j + 1) / res];
+        const uvd = [(i + 0) / res, (j + 1) / res];
+
+        uvs.push(uva);
+        uvs.push(uvb);
+        uvs.push(uvc);
+        uvs.push(uva);
+        uvs.push(uvc);
+        uvs.push(uvd);
+
+        const ca = getColor(a);
+        const cb = getColor(b);
+        const cc = getColor(c);
+        const cd = getColor(d);
+        const cabc = vec3.scale([], vec3.add([], ca, vec3.add([], cb, cc)), 1/3);
+        const cacd = vec3.scale([], vec3.add([], ca, vec3.add([], cc, cd)), 1/3);
+        colors.push(cabc);
+        colors.push(cabc);
+        colors.push(cabc);
+        colors.push(cacd);
+        colors.push(cacd);
+        colors.push(cacd);
       }
     }
     const bc = [];
@@ -192,6 +227,8 @@ async function main() {
     return {
       positions: regl.buffer(positions),
       colors: regl.buffer(colors),
+      uvs: regl.buffer(uvs),
+      normals: regl.buffer(normals),
       bc: regl.buffer(bc),
       count: positions.length,
     }
@@ -212,33 +249,48 @@ async function main() {
     canvas: canvas,
   });
 
+  const texture = regl.texture({
+    data: texture_img,
+    min: 'mipmap',
+    mag: 'linear',
+  });
+
   const render = regl({
     vert: `
       precision highp float;
-      attribute vec3 position;
-      attribute vec3 color;
-      attribute vec3 bc;
+      attribute vec3 position, normal, color, bc;
+      attribute vec2 uv;
       uniform mat4 model, view, projection;
-      varying vec3 vBC, vColor;
+      varying vec3 vBC, vColor, vNormal;
+      varying vec2 vUV;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
         vBC = bc;
         vColor = color;
+        vNormal = vec3(model * vec4(normal, 1));
+        vUV = uv;
       }
     `,
     frag: `
       precision highp float;
-      varying vec3 vBC, vColor;
+      uniform sampler2D texture;
+      uniform vec3 light;
+      varying vec3 vBC, vColor, vNormal;
+      varying vec2 vUV;
       void main() {
+        float t = texture2D(texture, vUV).r;
+        float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
         if (any(lessThan(vBC, vec3(0.01)))) {
-          gl_FragColor = vec4(1,1,1, 1.0);
+          gl_FragColor = vec4(vColor * 0.5 * l, 1.0);
         } else {
-          gl_FragColor = vec4(vColor, 1.0);
+          gl_FragColor = vec4(vColor * l * t * t, 1.0);
         }
       }
     `,
     attributes: {
       position: regl.prop('positions'),
+      normal: regl.prop('normals'),
+      uv: regl.prop('uvs'),
       color: regl.prop('colors'),
       bc: regl.prop('bc'),
     },
@@ -246,6 +298,8 @@ async function main() {
       model: regl.prop('model'),
       view: regl.prop('view'),
       projection: regl.prop('projection'),
+      light: regl.prop('light'),
+      texture: texture,
     },
     viewport: regl.prop('viewport'),
     count: regl.prop('count'),
@@ -255,9 +309,18 @@ async function main() {
     },
   });
 
-  const cam = SphereFPSCam([0,1.03,0], [0,0,-1]);
+  const camData = JSON.parse(localStorage.getItem('camData')) || {
+    position: [0,elevation([0,1,0]) + 10 + earthRadius,0],
+    forward: [0,0,-1]
+  };
+  console.log(camData);
+  const cam = SphereFPSCam(camData.position, camData.forward);
   cam.lookUp(-0.25);
   cam.lookRight(12);
+
+  setInterval(function() {
+    localStorage.setItem('camData', JSON.stringify(cam.dump()));
+  }, 1000);
 
   const arrows = {
     up: false,
@@ -295,11 +358,11 @@ async function main() {
     const speed = arrows.shift ? 10 : 1;
 
     if (arrows.up) {
-      cam.moveForward(0.001 * speed);
+      cam.moveForward(4000 * speed);
     }
 
     if (arrows.down) {
-      cam.moveForward(-0.001 * speed);
+      cam.moveForward(-4000 * speed);
     }
 
     if (arrows.left) {
@@ -310,8 +373,8 @@ async function main() {
       cam.lookRight(0.01 * speed);
     }
 
-    let e = 1 + elevation(cam.getPosition());
-    let delta = 100000 * meter + e - vec3.length(cam.getPosition());
+    let e = 100000 + earthRadius + elevation(cam.getPosition());
+    let delta = e - vec3.length(cam.getPosition());
     cam.moveUp(delta * 0.1);
 
     mapCanvas.width = window.innerWidth/4;
@@ -338,7 +401,7 @@ async function main() {
 
     const model = mat4.create();
     const view = cam.getView();
-    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 0.001, 10);
+    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 10, 10000000);
 
     const nodes = getRequiredNodes(cam.getPosition());
 
@@ -360,8 +423,11 @@ async function main() {
         projection: projection,
         viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
         positions: mesh.positions,
+        normals: mesh.normals,
+        uvs: mesh.uvs,
         colors: mesh.colors,
         bc: mesh.bc,
+        light: vec3.normalize([], cam.getPosition()),
         count: mesh.count
       });
     }
@@ -387,6 +453,13 @@ function SphereFPSCam(position, forward) {
   let phi = 0;
 
   normalize();
+
+  function dump() {
+    return {
+      position: position.slice(),
+      forward: forward.slice(),
+    };
+  }
 
   function normalize() {
     up = vec3.normalize([], position);
@@ -435,6 +508,7 @@ function SphereFPSCam(position, forward) {
     lookUp: lookUp,
     moveForward: moveForward,
     moveUp: moveUp,
+    dump: dump,
   }
 
 }
