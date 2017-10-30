@@ -163,10 +163,11 @@ async function main() {
 
 
   function buildMesh(node) {
-    const res = 8; // 256/3 appears to be the native resolution for depth=5 ;
+    const res = 8; // 256/3 appears to be the native resolution for depth=5
     const right = vec3.scale([], node.right, 2/res);
     const up = vec3.scale([], node.up, 2/res);
     const positions = [], colors = [], normals = [], uvs = [];
+    const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
     for (let i = 0; i < res; i++) {
       for (let j = 0; j < res; j++) {
         let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
@@ -179,6 +180,15 @@ async function main() {
         positions.push(getVertex(a));
         positions.push(getVertex(c));
         positions.push(getVertex(d));
+
+        vec3.min(bounds.min, bounds.min, getVertex(a));
+        vec3.min(bounds.min, bounds.min, getVertex(b));
+        vec3.min(bounds.min, bounds.min, getVertex(c));
+        vec3.min(bounds.min, bounds.min, getVertex(d));
+        vec3.max(bounds.max, bounds.max, getVertex(a));
+        vec3.max(bounds.max, bounds.max, getVertex(b));
+        vec3.max(bounds.max, bounds.max, getVertex(c));
+        vec3.max(bounds.max, bounds.max, getVertex(d));
 
         let ab = vec3.normalize([], vec3.sub([], getVertex(b), getVertex(a)));
         let ac = vec3.normalize([], vec3.sub([], getVertex(c), getVertex(a)));
@@ -219,13 +229,21 @@ async function main() {
         colors.push(cacd);
       }
     }
+
+    bounds.center = vec3.add([], bounds.min, vec3.scale([], vec3.sub([], bounds.max, bounds.min), 0.5));
+    for (let i = 0; i < positions.length; i++) {
+      vec3.sub(positions[i], positions[i], bounds.center);
+    }
+
     const bc = [];
     for (let i = 0; i < positions.length/3; i++) {
       bc.push([1,0,0]);
       bc.push([0,1,0]);
       bc.push([0,0,1]);
     }
+
     return {
+      offset: bounds.center,
       positions: regl.buffer(positions),
       colors: regl.buffer(colors),
       uvs: regl.buffer(uvs),
@@ -286,7 +304,7 @@ async function main() {
         gl_Position = projection * view * model * vec4(position, 1);
         vBC = bc;
         vColor = color;
-        vNormal = vec3(model * vec4(normal, 1));
+        vNormal = normal;//vec3(model * vec4(normal, 1));
         vUV = uv;
       }
     `,
@@ -417,8 +435,7 @@ async function main() {
     })();
 
 
-    const model = mat4.create();
-    const view = cam.getView();
+    const view = cam.getView(true);
     const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 10, 10000000);
 
     const nodes = getRequiredNodes(cam.getPosition());
@@ -435,6 +452,8 @@ async function main() {
     });
 
     for (let mesh of meshes) {
+      const translation = vec3.sub([], mesh.offset, cam.getPosition());
+      const model = mat4.fromTranslation([], translation);
       render({
         model: model,
         view: view,
@@ -512,10 +531,13 @@ function SphereFPSCam(position, forward) {
     normalize();
   }
 
-  function getView() {
+  function getView(zero) {
     normalize();
     const rotAroundRight = mat4.rotate([], mat4.create(), phi, right);
     const f = vec3.transformMat4([], forward, rotAroundRight);
+    if (zero) {
+      return mat4.lookAt([], [0,0,0], f, up);
+    }
     const center = vec3.add([], position, f);
     return mat4.lookAt([], position, center, up);
   }
