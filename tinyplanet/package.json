@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "budo -H 0.0.0.0 main.js:bundle.js --live",
-    "build": "rm -rf build; mkdir build; browserify main.js -o build/bundle.js; cp *.png build; cp index.html build",
+    "build": "rm -rf build; mkdir build; browserify main.js -o build/bundle.js; cp *.png *.jpg build; cp index.html build",
     "push": "git commit -am 'wip'; git push; git checkout gh-pages; git merge master; git push; git checkout master"
   },
   "keywords": [],
