@@ -28,7 +28,6 @@ module.exports = function(url_translator) {
           timestamp: performance.now(),
           key: key,
         };
-        console.log(cache[key]);
       })
       .catch(err => console.log(err));
 

@@ -138,21 +138,21 @@ async function main() {
     fs.mkdirSync('nodes');
   }
 
-  // for (let x = 0; x < WIDTH; x+=TILESIZE) {
-  //   for (let y = 0; y < HEIGHT; y+= TILESIZE) {
-  //     console.log(x, y);
-  //     tileCache[[x,y]] = await loadTile(x, y);
-  //   }
-  // }
+  for (let x = 0; x < WIDTH; x += TILESIZE) {
+    for (let y = 0; y < HEIGHT; y+= TILESIZE) {
+      console.log(x, y);
+      tileCache[[x,y]] = await loadTile(x, y);
+    }
+  }
 
   for (let root of sphere) {
     // tileCache = {};
     quadtree.traverse_async(root, async function(node, depth) {
-      if (depth === 5) {
-        if (!fs.existsSync(`nodes/${node.id}`)) {
-          console.log(`Storing node ${node.id}...`);
-          await storeNode(node);
-        }
+      if (!fs.existsSync(`nodes/${node.id}`)) {
+        console.log(`Storing node ${node.id}...`);
+        await storeNode(node);
+      }
+      if (depth === 6) {
         return false;
       }
       return true;
