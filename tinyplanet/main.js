@@ -3,16 +3,24 @@
 const REGL = require('regl');
 const glMatrix = require('gl-matrix');
 const Trackball = require('trackball-controller');
-const quadtree = require('./quadtree');
+const quadtree = require('../quadtree');
 const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
 
+const cache = require('./cache');
 
 const earthRadius = 6371000; // meters
 
 main();
 
 async function main() {
+
+  const nodeCache = cache(key => {
+    return `nodes/${key}.json`;
+  });
+
+  nodeCache.get('px-aaaaa');
+  return;
 
   const texture_img = await loadImage('texture.png');
 
@@ -80,43 +88,49 @@ async function main() {
 
 
   const sphere = [
+    quadtree.node( // Positive X
+      [ 1, -1,  1],
+      [ 1, -1, -1],
+      [ 1,  1, -1],
+      [ 1,  1,  1],
+      'px-'
+    ),
+    quadtree.node( // Negative X
+      [-1, -1, -1],
+      [-1, -1,  1],
+      [-1,  1,  1],
+      [-1,  1, -1],
+      'nx-'
+    ),
+    quadtree.node( // Positive Y
+      [-1,  1,  1],
+      [ 1,  1,  1],
+      [ 1,  1, -1],
+      [-1,  1, -1],
+      'py-'
+    ),
+    quadtree.node( // Negative Y
+      [-1, -1, -1],
+      [ 1, -1, -1],
+      [ 1, -1,  1],
+      [-1, -1,  1],
+      'ny-'
+    ),
     quadtree.node( // Positive Z
       [-1, -1,  1],
       [ 1, -1,  1],
       [ 1,  1,  1],
-      [-1,  1,  1]
+      [-1,  1,  1],
+      'pz-'
     ),
     quadtree.node( // Negagive Z
       [ 1, -1, -1],
       [-1, -1, -1],
       [-1,  1, -1],
       [ 1,  1, -1],
-    ),
-    quadtree.node( // Positive X
-      [ 1, -1,  1],
-      [ 1, -1, -1],
-      [ 1,  1, -1],
-      [ 1,  1,  1]
-    ),
-    quadtree.node( // Negative X
-      [-1, -1, -1],
-      [-1, -1,  1],
-      [-1,  1,  1],
-      [-1,  1, -1]
-    ),
-    quadtree.node( // Positive Y
-      [-1,  1,  1],
-      [ 1,  1,  1],
-      [ 1,  1, -1],
-      [-1,  1, -1]
-    ),
-    quadtree.node( // Negative Y
-      [-1, -1, -1],
-      [ 1, -1, -1],
-      [ 1, -1,  1],
-      [-1, -1,  1]
+      'nz-'
     )
-  ]
+  ];
 
 
   function getRequiredNodes(p) {
@@ -162,7 +176,7 @@ async function main() {
 
 
   function buildMesh(node) {
-    const res = 8; // 256/3 appears to be the native resolution for depth=5
+    const res = 8;
     const right = vec3.scale([], node.right, 2/res);
     const up = vec3.scale([], node.up, 2/res);
     const positions = [], colors = [], normals = [], uvs = [];
