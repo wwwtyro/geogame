@@ -11,6 +11,7 @@ const vec3 = glMatrix.vec3;
 const cache = require('./cache');
 
 const earthRadius = 6371000; // meters
+const vScale = 4.0;
 
 main();
 
@@ -155,7 +156,7 @@ async function main() {
   }
 
   function getElevation(p, depth) {
-    depth = 5;
+    depth = 9;
     const root = getTreeFace(p);
     const pu = unprojectPoint(p, root);
     const node = getTreeNode(p, depth);
@@ -170,7 +171,7 @@ async function main() {
     const swpu = vec3.sub([], pu, sw);
     const compright = vec3.dot(swpu, rightn)/(vec3.length(right) * 2);
     const compup = vec3.dot(swpu, upn)/(vec3.length(up) * 2);
-    return 32.0 * enode.elevations[Math.round(compright * res)][Math.round(compup * res)];
+    return vScale * enode.elevations[Math.round(compright * res)][Math.round(compup * res)];
   }
 
   function getAvailableNodes(p) {
@@ -182,10 +183,17 @@ async function main() {
           vec3.scale([], vec3.normalize([], node.se), earthRadius)
         );
         const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
-        if (dist > radius * 8) {
+        if (dist > radius * 1) {
+          const available = nodeCache.get(node.id);
+          if (available) {
+            nodes.push({
+              node: node,
+              enode: available,
+            });
+          }
           return false;
         }
-        if (depth === 5) {
+        if (depth === 9) {
           const available = nodeCache.get(node.id);
           if (available) {
             nodes.push({
@@ -202,15 +210,15 @@ async function main() {
   }
 
   const terrainMeshes = {};
-  // const vertexCache = {};
+  const vertexCache = {};
   const colorCache = {};
 
-  // function getVertex(p) {
-  //   if (!(p in vertexCache)) {
-  //     vertexCache[p] = vec3.scale([], vec3.normalize([], p), getElevation(p) + earthRadius);
-  //   }
-  //   return vertexCache[p].slice();
-  // }
+  function getVertex(p) {
+    if (!(p in vertexCache)) {
+      vertexCache[p] = vec3.scale([], vec3.normalize([], p), getElevation(p) + earthRadius);
+    }
+    return vertexCache[p].slice();
+  }
 
 
   function getColor(p) {
@@ -222,7 +230,7 @@ async function main() {
 
 
   function buildMesh(node, enode) {
-    const res = 2;//enode.resolution;
+    const res = enode.resolution;
     const right = vec3.scale([], node.right, 2/res);
     const up = vec3.scale([], node.up, 2/res);
     const positions = [], colors = [], normals = [], uvs = [];
@@ -234,30 +242,17 @@ async function main() {
         let c = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 1));
         let d = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 1));
 
-        const ma = vec3.scale([], vec3.normalize([], a), 32 * enode.elevations[i + 0][j + 0] + earthRadius);
-        const mb = vec3.scale([], vec3.normalize([], b), 32 * enode.elevations[i + 1][j + 0] + earthRadius);
-        const mc = vec3.scale([], vec3.normalize([], c), 32 * enode.elevations[i + 1][j + 1] + earthRadius);
-        const md = vec3.scale([], vec3.normalize([], d), 32 * enode.elevations[i + 0][j + 1] + earthRadius);
+        const ma = vec3.scale([], vec3.normalize([], a), vScale * enode.elevations[i + 0][j + 0] + earthRadius);
+        const mb = vec3.scale([], vec3.normalize([], b), vScale * enode.elevations[i + 1][j + 0] + earthRadius);
+        const mc = vec3.scale([], vec3.normalize([], c), vScale * enode.elevations[i + 1][j + 1] + earthRadius);
+        const md = vec3.scale([], vec3.normalize([], d), vScale * enode.elevations[i + 0][j + 1] + earthRadius);
 
-        // const ma = vec3.scale([], vec3.normalize([], a), earthRadius);
-        // const mb = vec3.scale([], vec3.normalize([], b), earthRadius);
-        // const mc = vec3.scale([], vec3.normalize([], c), earthRadius);
-        // const md = vec3.scale([], vec3.normalize([], d), earthRadius);
-
-        positions.push(ma);
-        positions.push(mb);
-        positions.push(mc);
-        positions.push(ma);
-        positions.push(mc);
-        positions.push(md);
-
-        // window.a = ma;
-        // window.b = mb;
-        // window.c = mc;
-        // window.d = md;
-        // window.vec3 = vec3;
-        // assplode;
-
+        positions.push(ma.slice());
+        positions.push(mb.slice());
+        positions.push(mc.slice());
+        positions.push(ma.slice());
+        positions.push(mc.slice());
+        positions.push(md.slice());
 
         vec3.min(bounds.min, bounds.min, ma);
         vec3.min(bounds.min, bounds.min, mb);
@@ -281,10 +276,10 @@ async function main() {
         normals.push(n);
         normals.push(n);
 
-        const uva = [(i + 0) / res, (j + 0) / res];
-        const uvb = [(i + 1) / res, (j + 0) / res];
-        const uvc = [(i + 1) / res, (j + 1) / res];
-        const uvd = [(i + 0) / res, (j + 1) / res];
+        const uva = [4 * (i + 0) / res, 4 * (j + 0) / res];
+        const uvb = [4 * (i + 1) / res, 4 * (j + 0) / res];
+        const uvc = [4 * (i + 1) / res, 4 * (j + 1) / res];
+        const uvd = [4 * (i + 0) / res, 4 * (j + 1) / res];
 
         uvs.push(uva);
         uvs.push(uvb);
@@ -313,9 +308,11 @@ async function main() {
       vec3.sub(positions[i], positions[i], bounds.center);
     }
 
+    // console.log(bounds);
+    //
     // console.log(positions);
     // assplode;
-    //
+
     const bc = [];
     for (let i = 0; i < positions.length/3; i++) {
       bc.push([1,0,0]);
@@ -370,6 +367,7 @@ async function main() {
     data: texture_img,
     min: 'mipmap',
     mag: 'linear',
+    wrap: 'repeat',
   });
 
   const render = regl({
@@ -431,8 +429,6 @@ async function main() {
     forward: [0,0,-1]
   };
   const cam = SphereFPSCam(camData.position, camData.forward);
-  cam.lookUp(-0.25);
-  cam.lookRight(12);
 
   setInterval(function() {
     localStorage.setItem('camData', JSON.stringify(cam.dump()));

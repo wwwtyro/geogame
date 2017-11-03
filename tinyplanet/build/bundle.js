@@ -1,1562 +1,68 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-"use strict";
+'use strict';
 
-const REGL = require('regl');
-const glMatrix = require('gl-matrix');
-const Trackball = require('trackball-controller');
-const quadtree = require('./quadtree');
-const mat4 = glMatrix.mat4;
-const vec3 = glMatrix.vec3;
+const vec3 = require('gl-matrix').vec3;
 
 
-const earthRadius = 6371000; // meters
+function node(sw, se, ne, nw, id) {
 
-main();
+  const q = {};
+  q.sw = sw.slice();
+  q.se = se.slice();
+  q.nw = nw.slice();
+  q.ne = ne.slice();
 
-async function main() {
+  q.right = vec3.scale([], vec3.sub([], q.se, q.sw), 0.5);
+  q.up = vec3.scale([], vec3.sub([], q.nw, q.sw), 0.5);
 
-  const texture_img = await loadImage('texture.png');
+  q.c = vec3.add([], vec3.add([], q.sw, q.right), q.up);
+  q.n = vec3.add([], q.nw, q.right);
+  q.s = vec3.add([], q.sw, q.right);
+  q.e = vec3.add([], q.se, q.up);
+  q.w = vec3.add([], q.sw, q.up);
 
-  const elevation_img = await loadImage('elevation.png');
+  q.id = id === undefined ? '0' : id;
 
-  const elevation = (function() {
-    const w = elevation_img.width;
-    const h = elevation_img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(elevation_img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-
-    const pi = Math.PI;
-    const twopi = pi * 2;
-
-    return function(p) {
-      p = vec3.normalize([], p);
-      const y = p[0];
-      const z = p[1]
-      const x = p[2];
-      const theta = Math.acos(z);
-      const phi = Math.atan2(y,x);
-      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
-      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
-      return 32 * 8850 * data[(j * w + i) * 4 + 0]/255; // +0 for red, +1 for green, etc...
-    }
-  })();
-
-  const color_img = await loadImage('earthcolor.jpg');
-
-  const color = (function() {
-    const w = color_img.width;
-    const h = color_img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(color_img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-
-    const pi = Math.PI;
-    const twopi = pi * 2;
-
-    const temp = [];
-    return function(p) {
-      p = vec3.normalize(temp, p);
-      const y = p[0];
-      const z = p[1]
-      const x = p[2];
-      const theta = Math.acos(z);
-      const phi = Math.atan2(y,x);
-      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
-      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
-      return [
-        data[(j * w + i) * 4 + 0]/255,
-        data[(j * w + i) * 4 + 1]/255,
-        data[(j * w + i) * 4 + 2]/255,
-      ];
-    }
-  })();
-
-
-
-  const sphere = [
-    quadtree.node( // Positive Z
-      [-1, -1,  1],
-      [ 1, -1,  1],
-      [ 1,  1,  1],
-      [-1,  1,  1]
-    ),
-    quadtree.node( // Negagive Z
-      [ 1, -1, -1],
-      [-1, -1, -1],
-      [-1,  1, -1],
-      [ 1,  1, -1],
-    ),
-    quadtree.node( // Positive X
-      [ 1, -1,  1],
-      [ 1, -1, -1],
-      [ 1,  1, -1],
-      [ 1,  1,  1]
-    ),
-    quadtree.node( // Negative X
-      [-1, -1, -1],
-      [-1, -1,  1],
-      [-1,  1,  1],
-      [-1,  1, -1]
-    ),
-    quadtree.node( // Positive Y
-      [-1,  1,  1],
-      [ 1,  1,  1],
-      [ 1,  1, -1],
-      [-1,  1, -1]
-    ),
-    quadtree.node( // Negative Y
-      [-1, -1, -1],
-      [ 1, -1, -1],
-      [ 1, -1,  1],
-      [-1, -1,  1]
-    )
-  ]
-
-
-  function getRequiredNodes(p) {
-    const nodes = [];
-    for (let root of sphere) {
-      quadtree.traverse(root, function(node, depth) {
-        const radius = vec3.distance(
-          vec3.scale([], vec3.normalize([], node.c), earthRadius),
-          vec3.scale([], vec3.normalize([], node.se), earthRadius)
-        );
-        const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
-        if (dist > radius * 8) {
-          return false;
-        }
-        if (depth > 4) {
-          nodes.push(node);
-          return false;
-        }
-        return true;
-      });
-    }
-    return nodes;
-  }
-
-  const terrainMeshes = {};
-  const vertexCache = {};
-  const colorCache = {};
-
-  function getVertex(p) {
-    if (!(p in vertexCache)) {
-      vertexCache[p] = vec3.scale([], vec3.normalize([], p), elevation(p) + earthRadius);
-    }
-    return vertexCache[p].slice();
-  }
-
-
-  function getColor(p) {
-    if (!(p in colorCache)) {
-      colorCache[p] = color(p);
-    }
-    return colorCache[p].slice();
-  }
-
-
-  function buildMesh(node) {
-    const res = 8; // 256/3 appears to be the native resolution for depth=5
-    const right = vec3.scale([], node.right, 2/res);
-    const up = vec3.scale([], node.up, 2/res);
-    const positions = [], colors = [], normals = [], uvs = [];
-    const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
-    for (let i = 0; i < res; i++) {
-      for (let j = 0; j < res; j++) {
-        let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
-        let b = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 0));
-        let c = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 1));
-        let d = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 1));
-        positions.push(getVertex(a));
-        positions.push(getVertex(b));
-        positions.push(getVertex(c));
-        positions.push(getVertex(a));
-        positions.push(getVertex(c));
-        positions.push(getVertex(d));
-
-        vec3.min(bounds.min, bounds.min, getVertex(a));
-        vec3.min(bounds.min, bounds.min, getVertex(b));
-        vec3.min(bounds.min, bounds.min, getVertex(c));
-        vec3.min(bounds.min, bounds.min, getVertex(d));
-        vec3.max(bounds.max, bounds.max, getVertex(a));
-        vec3.max(bounds.max, bounds.max, getVertex(b));
-        vec3.max(bounds.max, bounds.max, getVertex(c));
-        vec3.max(bounds.max, bounds.max, getVertex(d));
-
-        let ab = vec3.normalize([], vec3.sub([], getVertex(b), getVertex(a)));
-        let ac = vec3.normalize([], vec3.sub([], getVertex(c), getVertex(a)));
-        let n = vec3.cross([], ab, ac);
-        normals.push(n);
-        normals.push(n);
-        normals.push(n);
-
-        let ad = vec3.normalize([], vec3.sub([], getVertex(d), getVertex(a)));
-        n = vec3.cross([], ac, ad);
-        normals.push(n);
-        normals.push(n);
-        normals.push(n);
-
-        const uva = [(i + 0) / res, (j + 0) / res];
-        const uvb = [(i + 1) / res, (j + 0) / res];
-        const uvc = [(i + 1) / res, (j + 1) / res];
-        const uvd = [(i + 0) / res, (j + 1) / res];
-
-        uvs.push(uva);
-        uvs.push(uvb);
-        uvs.push(uvc);
-        uvs.push(uva);
-        uvs.push(uvc);
-        uvs.push(uvd);
-
-        const ca = getColor(a);
-        const cb = getColor(b);
-        const cc = getColor(c);
-        const cd = getColor(d);
-        const cabc = vec3.scale([], vec3.add([], ca, vec3.add([], cb, cc)), 1/3);
-        const cacd = vec3.scale([], vec3.add([], ca, vec3.add([], cc, cd)), 1/3);
-        colors.push(cabc);
-        colors.push(cabc);
-        colors.push(cabc);
-        colors.push(cacd);
-        colors.push(cacd);
-        colors.push(cacd);
-      }
-    }
-
-    bounds.center = vec3.add([], bounds.min, vec3.scale([], vec3.sub([], bounds.max, bounds.min), 0.5));
-    for (let i = 0; i < positions.length; i++) {
-      vec3.sub(positions[i], positions[i], bounds.center);
-    }
-
-    const bc = [];
-    for (let i = 0; i < positions.length/3; i++) {
-      bc.push([1,0,0]);
-      bc.push([0,1,0]);
-      bc.push([0,0,1]);
-    }
-
-    return {
-      offset: bounds.center,
-      positions: regl.buffer(positions),
-      colors: regl.buffer(colors),
-      uvs: regl.buffer(uvs),
-      normals: regl.buffer(normals),
-      bc: regl.buffer(bc),
-      count: positions.length,
-    }
-  }
-
-  function getMesh(node) {
-    if (!(node.c in terrainMeshes)) {
-      terrainMeshes[node.c] = buildMesh(node);
-    }
-    return terrainMeshes[node.c];
-  }
-
-  const canvas = document.getElementById('render-canvas');
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
-
-  function handleMouseMove(e) {
-    cam.lookUp(e.movementY * -0.001);
-    cam.lookRight(e.movementX * 0.001);
-  };
-
-  document.addEventListener('pointerlockchange', function() {
-    if (document.pointerLockElement === canvas) {
-      canvas.addEventListener('mousemove', handleMouseMove);
-      document.getElementById('info').style.display = 'none';
-    } else {
-      canvas.removeEventListener('mousemove', handleMouseMove);
-    }
-  });
-
-  canvas.addEventListener('click', function() {
-    canvas.requestPointerLock();
-  });
-
-  const regl = REGL({
-    canvas: canvas,
-  });
-
-  const texture = regl.texture({
-    data: texture_img,
-    min: 'mipmap',
-    mag: 'linear',
-  });
-
-  const render = regl({
-    vert: `
-      precision highp float;
-      attribute vec3 position, normal, color, bc;
-      attribute vec2 uv;
-      uniform mat4 model, view, projection;
-      varying vec3 vBC, vColor, vNormal;
-      varying vec2 vUV;
-      void main() {
-        gl_Position = projection * view * model * vec4(position, 1);
-        vBC = bc;
-        vColor = color;
-        vNormal = normal;//vec3(model * vec4(normal, 1));
-        vUV = uv;
-      }
-    `,
-    frag: `
-      precision highp float;
-      uniform sampler2D texture;
-      uniform vec3 light;
-      varying vec3 vBC, vColor, vNormal;
-      varying vec2 vUV;
-      void main() {
-        float t = texture2D(texture, vUV).r;
-        float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
-        if (any(lessThan(vBC, vec3(0.01)))) {
-          gl_FragColor = vec4(vColor * 0.5 * l, 1.0);
-        } else {
-          gl_FragColor = vec4(vColor * l * t * t, 1.0);
-        }
-      }
-    `,
-    attributes: {
-      position: regl.prop('positions'),
-      normal: regl.prop('normals'),
-      uv: regl.prop('uvs'),
-      color: regl.prop('colors'),
-      bc: regl.prop('bc'),
-    },
-    uniforms: {
-      model: regl.prop('model'),
-      view: regl.prop('view'),
-      projection: regl.prop('projection'),
-      light: regl.prop('light'),
-      texture: texture,
-    },
-    viewport: regl.prop('viewport'),
-    count: regl.prop('count'),
-    cull: {
-      enable: true,
-      face: 'back',
-    },
-  });
-
-  const camData = JSON.parse(localStorage.getItem('camData')) || {
-    position: [0,elevation([0,1,0]) + 10 + earthRadius,0],
-    forward: [0,0,-1]
-  };
-  const cam = SphereFPSCam(camData.position, camData.forward);
-  cam.lookUp(-0.25);
-  cam.lookRight(12);
-
-  setInterval(function() {
-    localStorage.setItem('camData', JSON.stringify(cam.dump()));
-  }, 1000);
-
-  const arrows = {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    shift: false,
-  }
-
-  window.addEventListener('keydown', function(e) {
-    if (e.which === 16) arrows.shift = true;
-    if (e.which === 87) arrows.up = true;
-    if (e.which === 83) arrows.down = true;
-    if (e.which === 65) arrows.left = true;
-    if (e.which === 68) arrows.right = true;
-  });
-
-  window.addEventListener('keyup', function(e) {
-    if (e.which === 16) arrows.shift = false;
-    if (e.which === 87) arrows.up = false;
-    if (e.which === 83) arrows.down = false;
-    if (e.which === 65) arrows.left = false;
-    if (e.which === 68) arrows.right = false;
-  });
-
-
-  const mapCanvas = document.getElementById('map');
-  const mapCtx = mapCanvas.getContext('2d');
-
-  function loop() {
-
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-
-    const speed = arrows.shift ? 10 : 1;
-
-    if (arrows.up) {
-      cam.moveForward(4000 * speed);
-    }
-
-    if (arrows.down) {
-      cam.moveForward(-4000 * speed);
-    }
-
-    if (arrows.left) {
-      cam.moveRight(-4000 * speed);
-    }
-
-    if (arrows.right) {
-      cam.moveRight(4000 * speed);
-    }
-
-    let e = 100000 + earthRadius + elevation(cam.getPosition());
-    let delta = e - vec3.length(cam.getPosition());
-    cam.moveUp(delta * 0.1);
-
-    mapCanvas.width = window.innerWidth/4;
-    mapCanvas.height = mapCanvas.width/2;
-    mapCtx.drawImage(color_img, 0, 0, mapCanvas.width, mapCanvas.height);
-
-    (function() {
-      const pi = Math.PI;
-      const twopi = 2 * pi;
-      const w = mapCanvas.width;
-      const h = mapCanvas.height;
-      const p = vec3.normalize([], cam.getPosition());
-      const y = p[0];
-      const z = p[1]
-      const x = p[2];
-      const theta = Math.acos(z);
-      const phi = Math.atan2(y,x);
-      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
-      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
-      mapCtx.fillStyle='#FF0000';
-      mapCtx.fillRect(i-4,j-4,9,9);
-    })();
-
-
-    const view = cam.getView(true);
-    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 10, 10000000);
-
-    const nodes = getRequiredNodes(cam.getPosition());
-
-    const meshes = [];
-
-    for (let node of nodes) {
-      meshes.push(getMesh(node));
-    }
-
-    regl.clear({
-      color: [110/255,163/255,209/255,1],
-      depth: 1,
-    });
-
-    for (let mesh of meshes) {
-      const translation = vec3.sub([], mesh.offset, cam.getPosition());
-      const model = mat4.fromTranslation([], translation);
-      render({
-        model: model,
-        view: view,
-        projection: projection,
-        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-        positions: mesh.positions,
-        normals: mesh.normals,
-        uvs: mesh.uvs,
-        colors: mesh.colors,
-        bc: mesh.bc,
-        light: vec3.normalize([], cam.getPosition()),
-        count: mesh.count
-      });
-    }
-
-    requestAnimationFrame(loop);
-  }
-
-  requestAnimationFrame(loop);
+  return q;
 
 }
 
 
-function SphereFPSCam(position, forward) {
+function traverse(q, test, depth) {
 
-  const pi = Math.PI;
+  depth = depth === undefined ? 0 : depth;
 
-  position = position.slice();
-  forward = forward.slice();
-
-  let right = [];
-  let up = [];
-
-  let phi = 0;
-
-  normalize();
-
-  function dump() {
-    return {
-      position: position.slice(),
-      forward: forward.slice(),
-    };
-  }
-
-  function normalize() {
-    up = vec3.normalize([], position);
-    forward = vec3.normalize(forward, forward);
-    vec3.cross(right, forward, up);
-    vec3.cross(forward, up, right);
-  }
-
-  function lookRight(delta) {
-    const rotAroundUp = mat4.rotate([], mat4.create(), -delta, up);
-    vec3.transformMat4(forward, forward, rotAroundUp);
-    normalize();
-  }
-
-  function lookUp(delta) {
-    phi += delta;
-    phi = Math.min(Math.max(-0.99 * pi/2, phi), 0.99 * pi/2);
-  }
-
-  function moveForward(delta) {
-    vec3.add(position, position, vec3.scale([], forward, delta));
-    normalize();
-  }
-
-  function moveUp(delta) {
-    vec3.add(position, position, vec3.scale([], up, delta));
-    normalize();
-  }
-
-  function moveRight(delta) {
-    vec3.add(position, position, vec3.scale([], right, delta));
-    normalize();
-  }
-
-  function getView(zero) {
-    normalize();
-    const rotAroundRight = mat4.rotate([], mat4.create(), phi, right);
-    const f = vec3.transformMat4([], forward, rotAroundRight);
-    if (zero) {
-      return mat4.lookAt([], [0,0,0], f, up);
-    }
-    const center = vec3.add([], position, f);
-    return mat4.lookAt([], position, center, up);
-  }
-
-  function getPosition() {
-    return position.slice();
-  }
-
-  return {
-    getView: getView,
-    getPosition: getPosition,
-    lookRight: lookRight,
-    lookUp: lookUp,
-    moveForward: moveForward,
-    moveUp: moveUp,
-    moveRight: moveRight,
-    dump: dump,
+  if (test(q, depth)) {
+    traverse(node(q.sw, q.s, q.c, q.w, q.id + 'a'), test, depth + 1);
+    traverse(node(q.s, q.se, q.e, q.c, q.id + 'b'), test, depth + 1);
+    traverse(node(q.c, q.e, q.ne, q.n, q.id + 'c'), test, depth + 1);
+    traverse(node(q.w, q.c, q.n, q.nw, q.id + 'd'), test, depth + 1);
   }
 
 }
 
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+async function traverse_async(q, test, depth) {
+
+  depth = depth === undefined ? 0 : depth;
+
+  if (await test(q, depth)) {
+    await traverse_async(node(q.sw, q.s, q.c, q.w, q.id + 'a'), test, depth + 1);
+    await traverse_async(node(q.s, q.se, q.e, q.c, q.id + 'b'), test, depth + 1);
+    await traverse_async(node(q.c, q.e, q.ne, q.n, q.id + 'c'), test, depth + 1);
+    await traverse_async(node(q.w, q.c, q.n, q.nw, q.id + 'd'), test, depth + 1);
+  }
+
 }
 
-function clamp(n, min, max) {
-  return Math.min(Math.max(n, min), max);
-}
 
-},{"./quadtree":29,"gl-matrix":26,"regl":27,"trackball-controller":28}],2:[function(require,module,exports){
-module.exports = adjoint;
-
-/**
- * Calculates the adjugate of a mat4
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the source matrix
- * @returns {mat4} out
- */
-function adjoint(out, a) {
-    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
-        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
-        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
-        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
-
-    out[0]  =  (a11 * (a22 * a33 - a23 * a32) - a21 * (a12 * a33 - a13 * a32) + a31 * (a12 * a23 - a13 * a22));
-    out[1]  = -(a01 * (a22 * a33 - a23 * a32) - a21 * (a02 * a33 - a03 * a32) + a31 * (a02 * a23 - a03 * a22));
-    out[2]  =  (a01 * (a12 * a33 - a13 * a32) - a11 * (a02 * a33 - a03 * a32) + a31 * (a02 * a13 - a03 * a12));
-    out[3]  = -(a01 * (a12 * a23 - a13 * a22) - a11 * (a02 * a23 - a03 * a22) + a21 * (a02 * a13 - a03 * a12));
-    out[4]  = -(a10 * (a22 * a33 - a23 * a32) - a20 * (a12 * a33 - a13 * a32) + a30 * (a12 * a23 - a13 * a22));
-    out[5]  =  (a00 * (a22 * a33 - a23 * a32) - a20 * (a02 * a33 - a03 * a32) + a30 * (a02 * a23 - a03 * a22));
-    out[6]  = -(a00 * (a12 * a33 - a13 * a32) - a10 * (a02 * a33 - a03 * a32) + a30 * (a02 * a13 - a03 * a12));
-    out[7]  =  (a00 * (a12 * a23 - a13 * a22) - a10 * (a02 * a23 - a03 * a22) + a20 * (a02 * a13 - a03 * a12));
-    out[8]  =  (a10 * (a21 * a33 - a23 * a31) - a20 * (a11 * a33 - a13 * a31) + a30 * (a11 * a23 - a13 * a21));
-    out[9]  = -(a00 * (a21 * a33 - a23 * a31) - a20 * (a01 * a33 - a03 * a31) + a30 * (a01 * a23 - a03 * a21));
-    out[10] =  (a00 * (a11 * a33 - a13 * a31) - a10 * (a01 * a33 - a03 * a31) + a30 * (a01 * a13 - a03 * a11));
-    out[11] = -(a00 * (a11 * a23 - a13 * a21) - a10 * (a01 * a23 - a03 * a21) + a20 * (a01 * a13 - a03 * a11));
-    out[12] = -(a10 * (a21 * a32 - a22 * a31) - a20 * (a11 * a32 - a12 * a31) + a30 * (a11 * a22 - a12 * a21));
-    out[13] =  (a00 * (a21 * a32 - a22 * a31) - a20 * (a01 * a32 - a02 * a31) + a30 * (a01 * a22 - a02 * a21));
-    out[14] = -(a00 * (a11 * a32 - a12 * a31) - a10 * (a01 * a32 - a02 * a31) + a30 * (a01 * a12 - a02 * a11));
-    out[15] =  (a00 * (a11 * a22 - a12 * a21) - a10 * (a01 * a22 - a02 * a21) + a20 * (a01 * a12 - a02 * a11));
-    return out;
-};
-},{}],3:[function(require,module,exports){
-module.exports = clone;
-
-/**
- * Creates a new mat4 initialized with values from an existing matrix
- *
- * @param {mat4} a matrix to clone
- * @returns {mat4} a new 4x4 matrix
- */
-function clone(a) {
-    var out = new Float32Array(16);
-    out[0] = a[0];
-    out[1] = a[1];
-    out[2] = a[2];
-    out[3] = a[3];
-    out[4] = a[4];
-    out[5] = a[5];
-    out[6] = a[6];
-    out[7] = a[7];
-    out[8] = a[8];
-    out[9] = a[9];
-    out[10] = a[10];
-    out[11] = a[11];
-    out[12] = a[12];
-    out[13] = a[13];
-    out[14] = a[14];
-    out[15] = a[15];
-    return out;
-};
-},{}],4:[function(require,module,exports){
-module.exports = copy;
-
-/**
- * Copy the values from one mat4 to another
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the source matrix
- * @returns {mat4} out
- */
-function copy(out, a) {
-    out[0] = a[0];
-    out[1] = a[1];
-    out[2] = a[2];
-    out[3] = a[3];
-    out[4] = a[4];
-    out[5] = a[5];
-    out[6] = a[6];
-    out[7] = a[7];
-    out[8] = a[8];
-    out[9] = a[9];
-    out[10] = a[10];
-    out[11] = a[11];
-    out[12] = a[12];
-    out[13] = a[13];
-    out[14] = a[14];
-    out[15] = a[15];
-    return out;
-};
-},{}],5:[function(require,module,exports){
-module.exports = create;
-
-/**
- * Creates a new identity mat4
- *
- * @returns {mat4} a new 4x4 matrix
- */
-function create() {
-    var out = new Float32Array(16);
-    out[0] = 1;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = 0;
-    out[5] = 1;
-    out[6] = 0;
-    out[7] = 0;
-    out[8] = 0;
-    out[9] = 0;
-    out[10] = 1;
-    out[11] = 0;
-    out[12] = 0;
-    out[13] = 0;
-    out[14] = 0;
-    out[15] = 1;
-    return out;
-};
-},{}],6:[function(require,module,exports){
-module.exports = determinant;
-
-/**
- * Calculates the determinant of a mat4
- *
- * @param {mat4} a the source matrix
- * @returns {Number} determinant of a
- */
-function determinant(a) {
-    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
-        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
-        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
-        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
-
-        b00 = a00 * a11 - a01 * a10,
-        b01 = a00 * a12 - a02 * a10,
-        b02 = a00 * a13 - a03 * a10,
-        b03 = a01 * a12 - a02 * a11,
-        b04 = a01 * a13 - a03 * a11,
-        b05 = a02 * a13 - a03 * a12,
-        b06 = a20 * a31 - a21 * a30,
-        b07 = a20 * a32 - a22 * a30,
-        b08 = a20 * a33 - a23 * a30,
-        b09 = a21 * a32 - a22 * a31,
-        b10 = a21 * a33 - a23 * a31,
-        b11 = a22 * a33 - a23 * a32;
-
-    // Calculate the determinant
-    return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-};
-},{}],7:[function(require,module,exports){
-module.exports = fromQuat;
-
-/**
- * Creates a matrix from a quaternion rotation.
- *
- * @param {mat4} out mat4 receiving operation result
- * @param {quat4} q Rotation quaternion
- * @returns {mat4} out
- */
-function fromQuat(out, q) {
-    var x = q[0], y = q[1], z = q[2], w = q[3],
-        x2 = x + x,
-        y2 = y + y,
-        z2 = z + z,
-
-        xx = x * x2,
-        yx = y * x2,
-        yy = y * y2,
-        zx = z * x2,
-        zy = z * y2,
-        zz = z * z2,
-        wx = w * x2,
-        wy = w * y2,
-        wz = w * z2;
-
-    out[0] = 1 - yy - zz;
-    out[1] = yx + wz;
-    out[2] = zx - wy;
-    out[3] = 0;
-
-    out[4] = yx - wz;
-    out[5] = 1 - xx - zz;
-    out[6] = zy + wx;
-    out[7] = 0;
-
-    out[8] = zx + wy;
-    out[9] = zy - wx;
-    out[10] = 1 - xx - yy;
-    out[11] = 0;
-
-    out[12] = 0;
-    out[13] = 0;
-    out[14] = 0;
-    out[15] = 1;
-
-    return out;
-};
-},{}],8:[function(require,module,exports){
-module.exports = fromRotationTranslation;
-
-/**
- * Creates a matrix from a quaternion rotation and vector translation
- * This is equivalent to (but much faster than):
- *
- *     mat4.identity(dest);
- *     mat4.translate(dest, vec);
- *     var quatMat = mat4.create();
- *     quat4.toMat4(quat, quatMat);
- *     mat4.multiply(dest, quatMat);
- *
- * @param {mat4} out mat4 receiving operation result
- * @param {quat4} q Rotation quaternion
- * @param {vec3} v Translation vector
- * @returns {mat4} out
- */
-function fromRotationTranslation(out, q, v) {
-    // Quaternion math
-    var x = q[0], y = q[1], z = q[2], w = q[3],
-        x2 = x + x,
-        y2 = y + y,
-        z2 = z + z,
-
-        xx = x * x2,
-        xy = x * y2,
-        xz = x * z2,
-        yy = y * y2,
-        yz = y * z2,
-        zz = z * z2,
-        wx = w * x2,
-        wy = w * y2,
-        wz = w * z2;
-
-    out[0] = 1 - (yy + zz);
-    out[1] = xy + wz;
-    out[2] = xz - wy;
-    out[3] = 0;
-    out[4] = xy - wz;
-    out[5] = 1 - (xx + zz);
-    out[6] = yz + wx;
-    out[7] = 0;
-    out[8] = xz + wy;
-    out[9] = yz - wx;
-    out[10] = 1 - (xx + yy);
-    out[11] = 0;
-    out[12] = v[0];
-    out[13] = v[1];
-    out[14] = v[2];
-    out[15] = 1;
-    
-    return out;
-};
-},{}],9:[function(require,module,exports){
-module.exports = frustum;
-
-/**
- * Generates a frustum matrix with the given bounds
- *
- * @param {mat4} out mat4 frustum matrix will be written into
- * @param {Number} left Left bound of the frustum
- * @param {Number} right Right bound of the frustum
- * @param {Number} bottom Bottom bound of the frustum
- * @param {Number} top Top bound of the frustum
- * @param {Number} near Near bound of the frustum
- * @param {Number} far Far bound of the frustum
- * @returns {mat4} out
- */
-function frustum(out, left, right, bottom, top, near, far) {
-    var rl = 1 / (right - left),
-        tb = 1 / (top - bottom),
-        nf = 1 / (near - far);
-    out[0] = (near * 2) * rl;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = 0;
-    out[5] = (near * 2) * tb;
-    out[6] = 0;
-    out[7] = 0;
-    out[8] = (right + left) * rl;
-    out[9] = (top + bottom) * tb;
-    out[10] = (far + near) * nf;
-    out[11] = -1;
-    out[12] = 0;
-    out[13] = 0;
-    out[14] = (far * near * 2) * nf;
-    out[15] = 0;
-    return out;
-};
-},{}],10:[function(require,module,exports){
-module.exports = identity;
-
-/**
- * Set a mat4 to the identity matrix
- *
- * @param {mat4} out the receiving matrix
- * @returns {mat4} out
- */
-function identity(out) {
-    out[0] = 1;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = 0;
-    out[5] = 1;
-    out[6] = 0;
-    out[7] = 0;
-    out[8] = 0;
-    out[9] = 0;
-    out[10] = 1;
-    out[11] = 0;
-    out[12] = 0;
-    out[13] = 0;
-    out[14] = 0;
-    out[15] = 1;
-    return out;
-};
-},{}],11:[function(require,module,exports){
 module.exports = {
-  create: require('./create')
-  , clone: require('./clone')
-  , copy: require('./copy')
-  , identity: require('./identity')
-  , transpose: require('./transpose')
-  , invert: require('./invert')
-  , adjoint: require('./adjoint')
-  , determinant: require('./determinant')
-  , multiply: require('./multiply')
-  , translate: require('./translate')
-  , scale: require('./scale')
-  , rotate: require('./rotate')
-  , rotateX: require('./rotateX')
-  , rotateY: require('./rotateY')
-  , rotateZ: require('./rotateZ')
-  , fromRotationTranslation: require('./fromRotationTranslation')
-  , fromQuat: require('./fromQuat')
-  , frustum: require('./frustum')
-  , perspective: require('./perspective')
-  , perspectiveFromFieldOfView: require('./perspectiveFromFieldOfView')
-  , ortho: require('./ortho')
-  , lookAt: require('./lookAt')
-  , str: require('./str')
-}
-},{"./adjoint":2,"./clone":3,"./copy":4,"./create":5,"./determinant":6,"./fromQuat":7,"./fromRotationTranslation":8,"./frustum":9,"./identity":10,"./invert":12,"./lookAt":13,"./multiply":14,"./ortho":15,"./perspective":16,"./perspectiveFromFieldOfView":17,"./rotate":18,"./rotateX":19,"./rotateY":20,"./rotateZ":21,"./scale":22,"./str":23,"./translate":24,"./transpose":25}],12:[function(require,module,exports){
-module.exports = invert;
-
-/**
- * Inverts a mat4
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the source matrix
- * @returns {mat4} out
- */
-function invert(out, a) {
-    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
-        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
-        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
-        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
-
-        b00 = a00 * a11 - a01 * a10,
-        b01 = a00 * a12 - a02 * a10,
-        b02 = a00 * a13 - a03 * a10,
-        b03 = a01 * a12 - a02 * a11,
-        b04 = a01 * a13 - a03 * a11,
-        b05 = a02 * a13 - a03 * a12,
-        b06 = a20 * a31 - a21 * a30,
-        b07 = a20 * a32 - a22 * a30,
-        b08 = a20 * a33 - a23 * a30,
-        b09 = a21 * a32 - a22 * a31,
-        b10 = a21 * a33 - a23 * a31,
-        b11 = a22 * a33 - a23 * a32,
-
-        // Calculate the determinant
-        det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-
-    if (!det) { 
-        return null; 
-    }
-    det = 1.0 / det;
-
-    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
-    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
-    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
-    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
-    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
-    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
-    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
-    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
-    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
-    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
-    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
-    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
-    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
-    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
-    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
-    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-
-    return out;
+  node: node,
+  traverse: traverse,
+  traverse_async: traverse_async,
 };
-},{}],13:[function(require,module,exports){
-var identity = require('./identity');
 
-module.exports = lookAt;
-
-/**
- * Generates a look-at matrix with the given eye position, focal point, and up axis
- *
- * @param {mat4} out mat4 frustum matrix will be written into
- * @param {vec3} eye Position of the viewer
- * @param {vec3} center Point the viewer is looking at
- * @param {vec3} up vec3 pointing up
- * @returns {mat4} out
- */
-function lookAt(out, eye, center, up) {
-    var x0, x1, x2, y0, y1, y2, z0, z1, z2, len,
-        eyex = eye[0],
-        eyey = eye[1],
-        eyez = eye[2],
-        upx = up[0],
-        upy = up[1],
-        upz = up[2],
-        centerx = center[0],
-        centery = center[1],
-        centerz = center[2];
-
-    if (Math.abs(eyex - centerx) < 0.000001 &&
-        Math.abs(eyey - centery) < 0.000001 &&
-        Math.abs(eyez - centerz) < 0.000001) {
-        return identity(out);
-    }
-
-    z0 = eyex - centerx;
-    z1 = eyey - centery;
-    z2 = eyez - centerz;
-
-    len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
-    z0 *= len;
-    z1 *= len;
-    z2 *= len;
-
-    x0 = upy * z2 - upz * z1;
-    x1 = upz * z0 - upx * z2;
-    x2 = upx * z1 - upy * z0;
-    len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
-    if (!len) {
-        x0 = 0;
-        x1 = 0;
-        x2 = 0;
-    } else {
-        len = 1 / len;
-        x0 *= len;
-        x1 *= len;
-        x2 *= len;
-    }
-
-    y0 = z1 * x2 - z2 * x1;
-    y1 = z2 * x0 - z0 * x2;
-    y2 = z0 * x1 - z1 * x0;
-
-    len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
-    if (!len) {
-        y0 = 0;
-        y1 = 0;
-        y2 = 0;
-    } else {
-        len = 1 / len;
-        y0 *= len;
-        y1 *= len;
-        y2 *= len;
-    }
-
-    out[0] = x0;
-    out[1] = y0;
-    out[2] = z0;
-    out[3] = 0;
-    out[4] = x1;
-    out[5] = y1;
-    out[6] = z1;
-    out[7] = 0;
-    out[8] = x2;
-    out[9] = y2;
-    out[10] = z2;
-    out[11] = 0;
-    out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
-    out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
-    out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
-    out[15] = 1;
-
-    return out;
-};
-},{"./identity":10}],14:[function(require,module,exports){
-module.exports = multiply;
-
-/**
- * Multiplies two mat4's
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the first operand
- * @param {mat4} b the second operand
- * @returns {mat4} out
- */
-function multiply(out, a, b) {
-    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
-        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
-        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
-        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
-
-    // Cache only the current line of the second matrix
-    var b0  = b[0], b1 = b[1], b2 = b[2], b3 = b[3];  
-    out[0] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
-    out[1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
-    out[2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
-    out[3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
-
-    b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
-    out[4] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
-    out[5] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
-    out[6] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
-    out[7] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
-
-    b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
-    out[8] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
-    out[9] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
-    out[10] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
-    out[11] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
-
-    b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
-    out[12] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
-    out[13] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
-    out[14] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
-    out[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
-    return out;
-};
-},{}],15:[function(require,module,exports){
-module.exports = ortho;
-
-/**
- * Generates a orthogonal projection matrix with the given bounds
- *
- * @param {mat4} out mat4 frustum matrix will be written into
- * @param {number} left Left bound of the frustum
- * @param {number} right Right bound of the frustum
- * @param {number} bottom Bottom bound of the frustum
- * @param {number} top Top bound of the frustum
- * @param {number} near Near bound of the frustum
- * @param {number} far Far bound of the frustum
- * @returns {mat4} out
- */
-function ortho(out, left, right, bottom, top, near, far) {
-    var lr = 1 / (left - right),
-        bt = 1 / (bottom - top),
-        nf = 1 / (near - far);
-    out[0] = -2 * lr;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = 0;
-    out[5] = -2 * bt;
-    out[6] = 0;
-    out[7] = 0;
-    out[8] = 0;
-    out[9] = 0;
-    out[10] = 2 * nf;
-    out[11] = 0;
-    out[12] = (left + right) * lr;
-    out[13] = (top + bottom) * bt;
-    out[14] = (far + near) * nf;
-    out[15] = 1;
-    return out;
-};
-},{}],16:[function(require,module,exports){
-module.exports = perspective;
-
-/**
- * Generates a perspective projection matrix with the given bounds
- *
- * @param {mat4} out mat4 frustum matrix will be written into
- * @param {number} fovy Vertical field of view in radians
- * @param {number} aspect Aspect ratio. typically viewport width/height
- * @param {number} near Near bound of the frustum
- * @param {number} far Far bound of the frustum
- * @returns {mat4} out
- */
-function perspective(out, fovy, aspect, near, far) {
-    var f = 1.0 / Math.tan(fovy / 2),
-        nf = 1 / (near - far);
-    out[0] = f / aspect;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    out[4] = 0;
-    out[5] = f;
-    out[6] = 0;
-    out[7] = 0;
-    out[8] = 0;
-    out[9] = 0;
-    out[10] = (far + near) * nf;
-    out[11] = -1;
-    out[12] = 0;
-    out[13] = 0;
-    out[14] = (2 * far * near) * nf;
-    out[15] = 0;
-    return out;
-};
-},{}],17:[function(require,module,exports){
-module.exports = perspectiveFromFieldOfView;
-
-/**
- * Generates a perspective projection matrix with the given field of view.
- * This is primarily useful for generating projection matrices to be used
- * with the still experiemental WebVR API.
- *
- * @param {mat4} out mat4 frustum matrix will be written into
- * @param {number} fov Object containing the following values: upDegrees, downDegrees, leftDegrees, rightDegrees
- * @param {number} near Near bound of the frustum
- * @param {number} far Far bound of the frustum
- * @returns {mat4} out
- */
-function perspectiveFromFieldOfView(out, fov, near, far) {
-    var upTan = Math.tan(fov.upDegrees * Math.PI/180.0),
-        downTan = Math.tan(fov.downDegrees * Math.PI/180.0),
-        leftTan = Math.tan(fov.leftDegrees * Math.PI/180.0),
-        rightTan = Math.tan(fov.rightDegrees * Math.PI/180.0),
-        xScale = 2.0 / (leftTan + rightTan),
-        yScale = 2.0 / (upTan + downTan);
-
-    out[0] = xScale;
-    out[1] = 0.0;
-    out[2] = 0.0;
-    out[3] = 0.0;
-    out[4] = 0.0;
-    out[5] = yScale;
-    out[6] = 0.0;
-    out[7] = 0.0;
-    out[8] = -((leftTan - rightTan) * xScale * 0.5);
-    out[9] = ((upTan - downTan) * yScale * 0.5);
-    out[10] = far / (near - far);
-    out[11] = -1.0;
-    out[12] = 0.0;
-    out[13] = 0.0;
-    out[14] = (far * near) / (near - far);
-    out[15] = 0.0;
-    return out;
-}
-
-
-},{}],18:[function(require,module,exports){
-module.exports = rotate;
-
-/**
- * Rotates a mat4 by the given angle
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to rotate
- * @param {Number} rad the angle to rotate the matrix by
- * @param {vec3} axis the axis to rotate around
- * @returns {mat4} out
- */
-function rotate(out, a, rad, axis) {
-    var x = axis[0], y = axis[1], z = axis[2],
-        len = Math.sqrt(x * x + y * y + z * z),
-        s, c, t,
-        a00, a01, a02, a03,
-        a10, a11, a12, a13,
-        a20, a21, a22, a23,
-        b00, b01, b02,
-        b10, b11, b12,
-        b20, b21, b22;
-
-    if (Math.abs(len) < 0.000001) { return null; }
-    
-    len = 1 / len;
-    x *= len;
-    y *= len;
-    z *= len;
-
-    s = Math.sin(rad);
-    c = Math.cos(rad);
-    t = 1 - c;
-
-    a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
-    a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
-    a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
-
-    // Construct the elements of the rotation matrix
-    b00 = x * x * t + c; b01 = y * x * t + z * s; b02 = z * x * t - y * s;
-    b10 = x * y * t - z * s; b11 = y * y * t + c; b12 = z * y * t + x * s;
-    b20 = x * z * t + y * s; b21 = y * z * t - x * s; b22 = z * z * t + c;
-
-    // Perform rotation-specific matrix multiplication
-    out[0] = a00 * b00 + a10 * b01 + a20 * b02;
-    out[1] = a01 * b00 + a11 * b01 + a21 * b02;
-    out[2] = a02 * b00 + a12 * b01 + a22 * b02;
-    out[3] = a03 * b00 + a13 * b01 + a23 * b02;
-    out[4] = a00 * b10 + a10 * b11 + a20 * b12;
-    out[5] = a01 * b10 + a11 * b11 + a21 * b12;
-    out[6] = a02 * b10 + a12 * b11 + a22 * b12;
-    out[7] = a03 * b10 + a13 * b11 + a23 * b12;
-    out[8] = a00 * b20 + a10 * b21 + a20 * b22;
-    out[9] = a01 * b20 + a11 * b21 + a21 * b22;
-    out[10] = a02 * b20 + a12 * b21 + a22 * b22;
-    out[11] = a03 * b20 + a13 * b21 + a23 * b22;
-
-    if (a !== out) { // If the source and destination differ, copy the unchanged last row
-        out[12] = a[12];
-        out[13] = a[13];
-        out[14] = a[14];
-        out[15] = a[15];
-    }
-    return out;
-};
-},{}],19:[function(require,module,exports){
-module.exports = rotateX;
-
-/**
- * Rotates a matrix by the given angle around the X axis
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to rotate
- * @param {Number} rad the angle to rotate the matrix by
- * @returns {mat4} out
- */
-function rotateX(out, a, rad) {
-    var s = Math.sin(rad),
-        c = Math.cos(rad),
-        a10 = a[4],
-        a11 = a[5],
-        a12 = a[6],
-        a13 = a[7],
-        a20 = a[8],
-        a21 = a[9],
-        a22 = a[10],
-        a23 = a[11];
-
-    if (a !== out) { // If the source and destination differ, copy the unchanged rows
-        out[0]  = a[0];
-        out[1]  = a[1];
-        out[2]  = a[2];
-        out[3]  = a[3];
-        out[12] = a[12];
-        out[13] = a[13];
-        out[14] = a[14];
-        out[15] = a[15];
-    }
-
-    // Perform axis-specific matrix multiplication
-    out[4] = a10 * c + a20 * s;
-    out[5] = a11 * c + a21 * s;
-    out[6] = a12 * c + a22 * s;
-    out[7] = a13 * c + a23 * s;
-    out[8] = a20 * c - a10 * s;
-    out[9] = a21 * c - a11 * s;
-    out[10] = a22 * c - a12 * s;
-    out[11] = a23 * c - a13 * s;
-    return out;
-};
-},{}],20:[function(require,module,exports){
-module.exports = rotateY;
-
-/**
- * Rotates a matrix by the given angle around the Y axis
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to rotate
- * @param {Number} rad the angle to rotate the matrix by
- * @returns {mat4} out
- */
-function rotateY(out, a, rad) {
-    var s = Math.sin(rad),
-        c = Math.cos(rad),
-        a00 = a[0],
-        a01 = a[1],
-        a02 = a[2],
-        a03 = a[3],
-        a20 = a[8],
-        a21 = a[9],
-        a22 = a[10],
-        a23 = a[11];
-
-    if (a !== out) { // If the source and destination differ, copy the unchanged rows
-        out[4]  = a[4];
-        out[5]  = a[5];
-        out[6]  = a[6];
-        out[7]  = a[7];
-        out[12] = a[12];
-        out[13] = a[13];
-        out[14] = a[14];
-        out[15] = a[15];
-    }
-
-    // Perform axis-specific matrix multiplication
-    out[0] = a00 * c - a20 * s;
-    out[1] = a01 * c - a21 * s;
-    out[2] = a02 * c - a22 * s;
-    out[3] = a03 * c - a23 * s;
-    out[8] = a00 * s + a20 * c;
-    out[9] = a01 * s + a21 * c;
-    out[10] = a02 * s + a22 * c;
-    out[11] = a03 * s + a23 * c;
-    return out;
-};
-},{}],21:[function(require,module,exports){
-module.exports = rotateZ;
-
-/**
- * Rotates a matrix by the given angle around the Z axis
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to rotate
- * @param {Number} rad the angle to rotate the matrix by
- * @returns {mat4} out
- */
-function rotateZ(out, a, rad) {
-    var s = Math.sin(rad),
-        c = Math.cos(rad),
-        a00 = a[0],
-        a01 = a[1],
-        a02 = a[2],
-        a03 = a[3],
-        a10 = a[4],
-        a11 = a[5],
-        a12 = a[6],
-        a13 = a[7];
-
-    if (a !== out) { // If the source and destination differ, copy the unchanged last row
-        out[8]  = a[8];
-        out[9]  = a[9];
-        out[10] = a[10];
-        out[11] = a[11];
-        out[12] = a[12];
-        out[13] = a[13];
-        out[14] = a[14];
-        out[15] = a[15];
-    }
-
-    // Perform axis-specific matrix multiplication
-    out[0] = a00 * c + a10 * s;
-    out[1] = a01 * c + a11 * s;
-    out[2] = a02 * c + a12 * s;
-    out[3] = a03 * c + a13 * s;
-    out[4] = a10 * c - a00 * s;
-    out[5] = a11 * c - a01 * s;
-    out[6] = a12 * c - a02 * s;
-    out[7] = a13 * c - a03 * s;
-    return out;
-};
-},{}],22:[function(require,module,exports){
-module.exports = scale;
-
-/**
- * Scales the mat4 by the dimensions in the given vec3
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to scale
- * @param {vec3} v the vec3 to scale the matrix by
- * @returns {mat4} out
- **/
-function scale(out, a, v) {
-    var x = v[0], y = v[1], z = v[2];
-
-    out[0] = a[0] * x;
-    out[1] = a[1] * x;
-    out[2] = a[2] * x;
-    out[3] = a[3] * x;
-    out[4] = a[4] * y;
-    out[5] = a[5] * y;
-    out[6] = a[6] * y;
-    out[7] = a[7] * y;
-    out[8] = a[8] * z;
-    out[9] = a[9] * z;
-    out[10] = a[10] * z;
-    out[11] = a[11] * z;
-    out[12] = a[12];
-    out[13] = a[13];
-    out[14] = a[14];
-    out[15] = a[15];
-    return out;
-};
-},{}],23:[function(require,module,exports){
-module.exports = str;
-
-/**
- * Returns a string representation of a mat4
- *
- * @param {mat4} mat matrix to represent as a string
- * @returns {String} string representation of the matrix
- */
-function str(a) {
-    return 'mat4(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ', ' +
-                    a[4] + ', ' + a[5] + ', ' + a[6] + ', ' + a[7] + ', ' +
-                    a[8] + ', ' + a[9] + ', ' + a[10] + ', ' + a[11] + ', ' + 
-                    a[12] + ', ' + a[13] + ', ' + a[14] + ', ' + a[15] + ')';
-};
-},{}],24:[function(require,module,exports){
-module.exports = translate;
-
-/**
- * Translate a mat4 by the given vector
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the matrix to translate
- * @param {vec3} v vector to translate by
- * @returns {mat4} out
- */
-function translate(out, a, v) {
-    var x = v[0], y = v[1], z = v[2],
-        a00, a01, a02, a03,
-        a10, a11, a12, a13,
-        a20, a21, a22, a23;
-
-    if (a === out) {
-        out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
-        out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
-        out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
-        out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
-    } else {
-        a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
-        a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
-        a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
-
-        out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
-        out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
-        out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
-
-        out[12] = a00 * x + a10 * y + a20 * z + a[12];
-        out[13] = a01 * x + a11 * y + a21 * z + a[13];
-        out[14] = a02 * x + a12 * y + a22 * z + a[14];
-        out[15] = a03 * x + a13 * y + a23 * z + a[15];
-    }
-
-    return out;
-};
-},{}],25:[function(require,module,exports){
-module.exports = transpose;
-
-/**
- * Transpose the values of a mat4
- *
- * @param {mat4} out the receiving matrix
- * @param {mat4} a the source matrix
- * @returns {mat4} out
- */
-function transpose(out, a) {
-    // If we are transposing ourselves we can skip a few steps but have to cache some values
-    if (out === a) {
-        var a01 = a[1], a02 = a[2], a03 = a[3],
-            a12 = a[6], a13 = a[7],
-            a23 = a[11];
-
-        out[1] = a[4];
-        out[2] = a[8];
-        out[3] = a[12];
-        out[4] = a01;
-        out[6] = a[9];
-        out[7] = a[13];
-        out[8] = a02;
-        out[9] = a12;
-        out[11] = a[14];
-        out[12] = a03;
-        out[13] = a13;
-        out[14] = a23;
-    } else {
-        out[0] = a[0];
-        out[1] = a[4];
-        out[2] = a[8];
-        out[3] = a[12];
-        out[4] = a[1];
-        out[5] = a[5];
-        out[6] = a[9];
-        out[7] = a[13];
-        out[8] = a[2];
-        out[9] = a[6];
-        out[10] = a[10];
-        out[11] = a[14];
-        out[12] = a[3];
-        out[13] = a[7];
-        out[14] = a[11];
-        out[15] = a[15];
-    }
-    
-    return out;
-};
-},{}],26:[function(require,module,exports){
+},{"gl-matrix":2}],2:[function(require,module,exports){
 /**
  * @fileoverview gl-matrix - High performance matrix and vector operations
  * @author Brandon Jones
@@ -8445,7 +6951,1605 @@ var forEach = exports.forEach = function () {
 /***/ })
 /******/ ]);
 });
+},{}],3:[function(require,module,exports){
+"use strict";
+
+module.exports = function(url_translator) {
+
+  const cache = {};
+  const inflight = {};
+
+  function get(key) {
+
+    if (key in cache) {
+      return cache[key].data;
+    }
+
+    if (key in inflight) return false;
+
+    const url = url_translator(key);
+
+    inflight[key] = true;
+
+    fetch(url)
+      .then(response => {
+        delete inflight[key];
+        return response.json();
+      })
+      .then(data => {
+        cache[key] = {
+          data: data,
+          timestamp: performance.now(),
+          key: key,
+        };
+      })
+      .catch(err => console.log(err));
+
+    return false;
+
+  }
+
+  return {
+    get: get,
+  };
+
+}
+
+},{}],4:[function(require,module,exports){
+"use strict";
+
+const REGL = require('regl');
+const glMatrix = require('gl-matrix');
+const Trackball = require('trackball-controller');
+const quadtree = require('../quadtree');
+const SphereFPSCam = require('./sphere-fps-cam');
+const mat4 = glMatrix.mat4;
+const vec3 = glMatrix.vec3;
+
+const cache = require('./cache');
+
+const earthRadius = 6371000; // meters
+const vScale = 4.0;
+
+main();
+
+async function main() {
+
+  const nodeCache = cache(key => {
+    return `nodes/${key}.json`;
+  });
+
+  const texture_img = await loadImage('texture.png');
+
+  const color_img = await loadImage('earthcolor.jpg');
+
+  const color = (function() {
+    const w = color_img.width;
+    const h = color_img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(color_img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const pi = Math.PI;
+    const twopi = pi * 2;
+
+    const temp = [];
+    return function(p) {
+      p = vec3.normalize(temp, p);
+      const y = p[0];
+      const z = p[1]
+      const x = p[2];
+      const theta = Math.acos(z);
+      const phi = Math.atan2(y,x);
+      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
+      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
+      return [
+        data[(j * w + i) * 4 + 0]/255,
+        data[(j * w + i) * 4 + 1]/255,
+        data[(j * w + i) * 4 + 2]/255,
+      ];
+    }
+  })();
+
+
+
+  const sphere = [
+    quadtree.node( // Positive X
+      [ 1, -1,  1],
+      [ 1, -1, -1],
+      [ 1,  1, -1],
+      [ 1,  1,  1],
+      'px-'
+    ),
+    quadtree.node( // Negative X
+      [-1, -1, -1],
+      [-1, -1,  1],
+      [-1,  1,  1],
+      [-1,  1, -1],
+      'nx-'
+    ),
+    quadtree.node( // Positive Y
+      [-1,  1,  1],
+      [ 1,  1,  1],
+      [ 1,  1, -1],
+      [-1,  1, -1],
+      'py-'
+    ),
+    quadtree.node( // Negative Y
+      [-1, -1, -1],
+      [ 1, -1, -1],
+      [ 1, -1,  1],
+      [-1, -1,  1],
+      'ny-'
+    ),
+    quadtree.node( // Positive Z
+      [-1, -1,  1],
+      [ 1, -1,  1],
+      [ 1,  1,  1],
+      [-1,  1,  1],
+      'pz-'
+    ),
+    quadtree.node( // Negative Z
+      [ 1, -1, -1],
+      [-1, -1, -1],
+      [-1,  1, -1],
+      [ 1,  1, -1],
+      'nz-'
+    )
+  ];
+
+
+  function getTreeFace(p) {
+    const pn = vec3.normalize([], p);
+    const roots = [[0, [1,0,0]], [1, [-1,0,0]], [2, [0,1,0]], [3, [0,-1,0]], [4, [0,0,1]], [5, [0,0,-1]]];
+    let maxi=0, maxv=-Infinity;
+    for (let root of roots) {
+      const dot = vec3.dot(pn, root[1]);
+      if (dot > maxv) {
+        maxv = dot;
+        maxi = root[0];
+      }
+    }
+    return sphere[maxi];
+  }
+
+  function unprojectPoint(p, face) {
+    const pn = vec3.normalize([], p);
+    let index = 0, alpha = 0;
+    if (face.c[0] === 1) {index = 0; alpha = 1};
+    if (face.c[0] === -1) {index = 0; alpha = -1};
+    if (face.c[1] === 1) {index = 1; alpha = 1};
+    if (face.c[1] === -1) {index = 1; alpha = -1};
+    if (face.c[2] === 1) {index = 2; alpha = 1};
+    if (face.c[2] === -1) {index = 2; alpha = -1};
+    const dt = (alpha - p[index])/pn[index];
+    return vec3.add([], p, vec3.scale([], pn, dt));
+  }
+
+  function getTreeNode(p, depth) {
+    const root = getTreeFace(p);
+    const pu = unprojectPoint(p, root);
+    let rnode = null;
+    quadtree.traverse(root, function(node, d) {
+      const right = node.right;
+      const up = node.up;
+      const wpu = vec3.sub([], pu, node.w);
+      if (vec3.dot(wpu, right) < 0) return false;
+      const epu = vec3.sub([], pu, node.e);
+      if (vec3.dot(epu, right) > 0) return false;
+      const spu = vec3.sub([], pu, node.s);
+      if (vec3.dot(spu, up) < 0) return false;
+      const npu = vec3.sub([], pu, node.n);
+      if (vec3.dot(npu, up) > 0) return false;
+      if (d === depth) {
+        rnode = node;
+        return false;
+      }
+      return true;
+    });
+    return rnode;
+  }
+
+  function getElevation(p, depth) {
+    depth = 9;
+    const root = getTreeFace(p);
+    const pu = unprojectPoint(p, root);
+    const node = getTreeNode(p, depth);
+    const enode = nodeCache.get(node.id);
+    if (!enode) return 0;
+    const res = enode.resolution;
+    const right = node.right;
+    const rightn = vec3.normalize([], node.right);
+    const up = node.up;
+    const upn = vec3.normalize([], node.up);
+    const sw = node.sw;
+    const swpu = vec3.sub([], pu, sw);
+    const compright = vec3.dot(swpu, rightn)/(vec3.length(right) * 2);
+    const compup = vec3.dot(swpu, upn)/(vec3.length(up) * 2);
+    return vScale * enode.elevations[Math.round(compright * res)][Math.round(compup * res)];
+  }
+
+  function getAvailableNodes(p) {
+    const nodes = [];
+    for (let root of sphere) {
+      quadtree.traverse(root, function(node, depth) {
+        const radius = vec3.distance(
+          vec3.scale([], vec3.normalize([], node.c), earthRadius),
+          vec3.scale([], vec3.normalize([], node.se), earthRadius)
+        );
+        const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
+        if (dist > radius * 1) {
+          const available = nodeCache.get(node.id);
+          if (available) {
+            nodes.push({
+              node: node,
+              enode: available,
+            });
+          }
+          return false;
+        }
+        if (depth === 9) {
+          const available = nodeCache.get(node.id);
+          if (available) {
+            nodes.push({
+              node: node,
+              enode: available,
+            });
+          }
+          return false;
+        }
+        return true;
+      });
+    }
+    return nodes;
+  }
+
+  const terrainMeshes = {};
+  const vertexCache = {};
+  const colorCache = {};
+
+  function getVertex(p) {
+    if (!(p in vertexCache)) {
+      vertexCache[p] = vec3.scale([], vec3.normalize([], p), getElevation(p) + earthRadius);
+    }
+    return vertexCache[p].slice();
+  }
+
+
+  function getColor(p) {
+    if (!(p in colorCache)) {
+      colorCache[p] = color(p);
+    }
+    return colorCache[p].slice();
+  }
+
+
+  function buildMesh(node, enode) {
+    const res = enode.resolution;
+    const right = vec3.scale([], node.right, 2/res);
+    const up = vec3.scale([], node.up, 2/res);
+    const positions = [], colors = [], normals = [], uvs = [];
+    const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
+    for (let i = 0; i < res; i++) {
+      for (let j = 0; j < res; j++) {
+        let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
+        let b = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 0));
+        let c = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 1));
+        let d = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 1));
+
+        const ma = vec3.scale([], vec3.normalize([], a), vScale * enode.elevations[i + 0][j + 0] + earthRadius);
+        const mb = vec3.scale([], vec3.normalize([], b), vScale * enode.elevations[i + 1][j + 0] + earthRadius);
+        const mc = vec3.scale([], vec3.normalize([], c), vScale * enode.elevations[i + 1][j + 1] + earthRadius);
+        const md = vec3.scale([], vec3.normalize([], d), vScale * enode.elevations[i + 0][j + 1] + earthRadius);
+
+        positions.push(ma.slice());
+        positions.push(mb.slice());
+        positions.push(mc.slice());
+        positions.push(ma.slice());
+        positions.push(mc.slice());
+        positions.push(md.slice());
+
+        vec3.min(bounds.min, bounds.min, ma);
+        vec3.min(bounds.min, bounds.min, mb);
+        vec3.min(bounds.min, bounds.min, mc);
+        vec3.min(bounds.min, bounds.min, md);
+        vec3.max(bounds.max, bounds.max, ma);
+        vec3.max(bounds.max, bounds.max, mb);
+        vec3.max(bounds.max, bounds.max, mc);
+        vec3.max(bounds.max, bounds.max, md);
+
+        let ab = vec3.normalize([], vec3.sub([], mb, ma));
+        let ac = vec3.normalize([], vec3.sub([], mc, ma));
+        let n = vec3.cross([], ab, ac);
+        normals.push(n);
+        normals.push(n);
+        normals.push(n);
+
+        let ad = vec3.normalize([], vec3.sub([], md, ma));
+        n = vec3.cross([], ac, ad);
+        normals.push(n);
+        normals.push(n);
+        normals.push(n);
+
+        const uva = [4 * (i + 0) / res, 4 * (j + 0) / res];
+        const uvb = [4 * (i + 1) / res, 4 * (j + 0) / res];
+        const uvc = [4 * (i + 1) / res, 4 * (j + 1) / res];
+        const uvd = [4 * (i + 0) / res, 4 * (j + 1) / res];
+
+        uvs.push(uva);
+        uvs.push(uvb);
+        uvs.push(uvc);
+        uvs.push(uva);
+        uvs.push(uvc);
+        uvs.push(uvd);
+
+        const ca = getColor(a);
+        const cb = getColor(b);
+        const cc = getColor(c);
+        const cd = getColor(d);
+        const cabc = vec3.scale([], vec3.add([], ca, vec3.add([], cb, cc)), 1/3);
+        const cacd = vec3.scale([], vec3.add([], ca, vec3.add([], cc, cd)), 1/3);
+        colors.push(cabc);
+        colors.push(cabc);
+        colors.push(cabc);
+        colors.push(cacd);
+        colors.push(cacd);
+        colors.push(cacd);
+      }
+    }
+
+    bounds.center = vec3.add([], bounds.min, vec3.scale([], vec3.sub([], bounds.max, bounds.min), 0.5));
+    for (let i = 0; i < positions.length; i++) {
+      vec3.sub(positions[i], positions[i], bounds.center);
+    }
+
+    // console.log(bounds);
+    //
+    // console.log(positions);
+    // assplode;
+
+    const bc = [];
+    for (let i = 0; i < positions.length/3; i++) {
+      bc.push([1,0,0]);
+      bc.push([0,1,0]);
+      bc.push([0,0,1]);
+    }
+
+    return {
+      offset: bounds.center,
+      positions: regl.buffer(positions),
+      colors: regl.buffer(colors),
+      uvs: regl.buffer(uvs),
+      normals: regl.buffer(normals),
+      bc: regl.buffer(bc),
+      count: positions.length,
+    }
+  }
+
+  function getMesh(node, enode) {
+    if (!(node.id in terrainMeshes)) {
+      terrainMeshes[node.id] = buildMesh(node, enode);
+    }
+    return terrainMeshes[node.id];
+  }
+
+  const canvas = document.getElementById('render-canvas');
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+
+  function handleMouseMove(e) {
+    cam.lookUp(e.movementY * -0.001);
+    cam.lookRight(e.movementX * 0.001);
+  };
+
+  document.addEventListener('pointerlockchange', function() {
+    if (document.pointerLockElement === canvas) {
+      canvas.addEventListener('mousemove', handleMouseMove);
+    } else {
+      canvas.removeEventListener('mousemove', handleMouseMove);
+    }
+  });
+
+  canvas.addEventListener('click', function() {
+    canvas.requestPointerLock();
+  });
+
+  const regl = REGL({
+    canvas: canvas,
+  });
+
+  const texture = regl.texture({
+    data: texture_img,
+    min: 'mipmap',
+    mag: 'linear',
+    wrap: 'repeat',
+  });
+
+  const render = regl({
+    vert: `
+      precision highp float;
+      attribute vec3 position, normal, color, bc;
+      attribute vec2 uv;
+      uniform mat4 model, view, projection;
+      varying vec3 vBC, vColor, vNormal;
+      varying vec2 vUV;
+      void main() {
+        gl_Position = projection * view * model * vec4(position, 1);
+        vBC = bc;
+        vColor = color;
+        vNormal = normal;//vec3(model * vec4(normal, 1));
+        vUV = uv;
+      }
+    `,
+    frag: `
+      precision highp float;
+      uniform sampler2D texture;
+      uniform vec3 light;
+      varying vec3 vBC, vColor, vNormal;
+      varying vec2 vUV;
+      void main() {
+        float t = texture2D(texture, vUV).r;
+        float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
+        if (any(lessThan(vBC, vec3(0.01)))) {
+          gl_FragColor = vec4(vColor * 0.5 * l, 1.0);
+        } else {
+          gl_FragColor = vec4(vColor * l * t * t, 1.0);
+        }
+      }
+    `,
+    attributes: {
+      position: regl.prop('positions'),
+      normal: regl.prop('normals'),
+      uv: regl.prop('uvs'),
+      color: regl.prop('colors'),
+      bc: regl.prop('bc'),
+    },
+    uniforms: {
+      model: regl.prop('model'),
+      view: regl.prop('view'),
+      projection: regl.prop('projection'),
+      light: regl.prop('light'),
+      texture: texture,
+    },
+    viewport: regl.prop('viewport'),
+    count: regl.prop('count'),
+    cull: {
+      enable: true,
+      face: 'back',
+    },
+  });
+
+  const camData = JSON.parse(localStorage.getItem('camData')) || {
+    position: [0,getElevation([0,1,0]) + 10 + earthRadius,0],
+    forward: [0,0,-1]
+  };
+  const cam = SphereFPSCam(camData.position, camData.forward);
+
+  setInterval(function() {
+    localStorage.setItem('camData', JSON.stringify(cam.dump()));
+  }, 1000);
+
+  const arrows = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    shift: false,
+  }
+
+  window.addEventListener('keydown', function(e) {
+    if (e.which === 16) arrows.shift = true;
+    if (e.which === 87) arrows.up = true;
+    if (e.which === 83) arrows.down = true;
+    if (e.which === 65) arrows.left = true;
+    if (e.which === 68) arrows.right = true;
+  });
+
+  window.addEventListener('keyup', function(e) {
+    if (e.which === 16) arrows.shift = false;
+    if (e.which === 87) arrows.up = false;
+    if (e.which === 83) arrows.down = false;
+    if (e.which === 65) arrows.left = false;
+    if (e.which === 68) arrows.right = false;
+  });
+
+
+  const mapCanvas = document.getElementById('map');
+  const mapCtx = mapCanvas.getContext('2d');
+
+  function loop() {
+
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+
+    const speed = arrows.shift ? 10 : 1;
+
+    if (arrows.up) {
+      cam.moveForward(4000 * speed);
+    }
+
+    if (arrows.down) {
+      cam.moveForward(-4000 * speed);
+    }
+
+    if (arrows.left) {
+      cam.moveRight(-4000 * speed);
+    }
+
+    if (arrows.right) {
+      cam.moveRight(4000 * speed);
+    }
+
+    let e = 100000 + earthRadius + getElevation(cam.getPosition());
+    let delta = e - vec3.length(cam.getPosition());
+    cam.moveUp(delta * 0.1);
+
+    mapCanvas.width = window.innerWidth/4;
+    mapCanvas.height = mapCanvas.width/2;
+    mapCtx.drawImage(color_img, 0, 0, mapCanvas.width, mapCanvas.height);
+
+    (function() {
+      const pi = Math.PI;
+      const twopi = 2 * pi;
+      const w = mapCanvas.width;
+      const h = mapCanvas.height;
+      const p = vec3.normalize([], cam.getPosition());
+      const y = p[0];
+      const z = p[1]
+      const x = p[2];
+      const theta = Math.acos(z);
+      const phi = Math.atan2(y,x);
+      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
+      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
+      mapCtx.fillStyle='#FF0000';
+      mapCtx.fillRect(i-4,j-4,9,9);
+    })();
+
+
+    const view = cam.getView(true);
+    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 10, 10000000);
+
+    const nodes = getAvailableNodes(cam.getPosition());
+
+    const meshes = [];
+
+    for (let node of nodes) {
+      meshes.push(getMesh(node.node, node.enode));
+    }
+
+    regl.clear({
+      color: [110/255,163/255,209/255,1],
+      depth: 1,
+    });
+
+    for (let mesh of meshes) {
+      const translation = vec3.sub([], mesh.offset, cam.getPosition());
+      const model = mat4.fromTranslation([], translation);
+      render({
+        model: model,
+        view: view,
+        projection: projection,
+        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+        positions: mesh.positions,
+        normals: mesh.normals,
+        uvs: mesh.uvs,
+        colors: mesh.colors,
+        bc: mesh.bc,
+        light: vec3.normalize([], cam.getPosition()),
+        count: mesh.count
+      });
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+
+}
+
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+function clamp(n, min, max) {
+  return Math.min(Math.max(n, min), max);
+}
+
+},{"../quadtree":1,"./cache":3,"./sphere-fps-cam":32,"gl-matrix":29,"regl":30,"trackball-controller":31}],5:[function(require,module,exports){
+module.exports = adjoint;
+
+/**
+ * Calculates the adjugate of a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+function adjoint(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+    out[0]  =  (a11 * (a22 * a33 - a23 * a32) - a21 * (a12 * a33 - a13 * a32) + a31 * (a12 * a23 - a13 * a22));
+    out[1]  = -(a01 * (a22 * a33 - a23 * a32) - a21 * (a02 * a33 - a03 * a32) + a31 * (a02 * a23 - a03 * a22));
+    out[2]  =  (a01 * (a12 * a33 - a13 * a32) - a11 * (a02 * a33 - a03 * a32) + a31 * (a02 * a13 - a03 * a12));
+    out[3]  = -(a01 * (a12 * a23 - a13 * a22) - a11 * (a02 * a23 - a03 * a22) + a21 * (a02 * a13 - a03 * a12));
+    out[4]  = -(a10 * (a22 * a33 - a23 * a32) - a20 * (a12 * a33 - a13 * a32) + a30 * (a12 * a23 - a13 * a22));
+    out[5]  =  (a00 * (a22 * a33 - a23 * a32) - a20 * (a02 * a33 - a03 * a32) + a30 * (a02 * a23 - a03 * a22));
+    out[6]  = -(a00 * (a12 * a33 - a13 * a32) - a10 * (a02 * a33 - a03 * a32) + a30 * (a02 * a13 - a03 * a12));
+    out[7]  =  (a00 * (a12 * a23 - a13 * a22) - a10 * (a02 * a23 - a03 * a22) + a20 * (a02 * a13 - a03 * a12));
+    out[8]  =  (a10 * (a21 * a33 - a23 * a31) - a20 * (a11 * a33 - a13 * a31) + a30 * (a11 * a23 - a13 * a21));
+    out[9]  = -(a00 * (a21 * a33 - a23 * a31) - a20 * (a01 * a33 - a03 * a31) + a30 * (a01 * a23 - a03 * a21));
+    out[10] =  (a00 * (a11 * a33 - a13 * a31) - a10 * (a01 * a33 - a03 * a31) + a30 * (a01 * a13 - a03 * a11));
+    out[11] = -(a00 * (a11 * a23 - a13 * a21) - a10 * (a01 * a23 - a03 * a21) + a20 * (a01 * a13 - a03 * a11));
+    out[12] = -(a10 * (a21 * a32 - a22 * a31) - a20 * (a11 * a32 - a12 * a31) + a30 * (a11 * a22 - a12 * a21));
+    out[13] =  (a00 * (a21 * a32 - a22 * a31) - a20 * (a01 * a32 - a02 * a31) + a30 * (a01 * a22 - a02 * a21));
+    out[14] = -(a00 * (a11 * a32 - a12 * a31) - a10 * (a01 * a32 - a02 * a31) + a30 * (a01 * a12 - a02 * a11));
+    out[15] =  (a00 * (a11 * a22 - a12 * a21) - a10 * (a01 * a22 - a02 * a21) + a20 * (a01 * a12 - a02 * a11));
+    return out;
+};
+},{}],6:[function(require,module,exports){
+module.exports = clone;
+
+/**
+ * Creates a new mat4 initialized with values from an existing matrix
+ *
+ * @param {mat4} a matrix to clone
+ * @returns {mat4} a new 4x4 matrix
+ */
+function clone(a) {
+    var out = new Float32Array(16);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    out[9] = a[9];
+    out[10] = a[10];
+    out[11] = a[11];
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+},{}],7:[function(require,module,exports){
+module.exports = copy;
+
+/**
+ * Copy the values from one mat4 to another
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+function copy(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    out[9] = a[9];
+    out[10] = a[10];
+    out[11] = a[11];
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+},{}],8:[function(require,module,exports){
+module.exports = create;
+
+/**
+ * Creates a new identity mat4
+ *
+ * @returns {mat4} a new 4x4 matrix
+ */
+function create() {
+    var out = new Float32Array(16);
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 1;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 1;
+    out[11] = 0;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = 0;
+    out[15] = 1;
+    return out;
+};
+},{}],9:[function(require,module,exports){
+module.exports = determinant;
+
+/**
+ * Calculates the determinant of a mat4
+ *
+ * @param {mat4} a the source matrix
+ * @returns {Number} determinant of a
+ */
+function determinant(a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
+
+        b00 = a00 * a11 - a01 * a10,
+        b01 = a00 * a12 - a02 * a10,
+        b02 = a00 * a13 - a03 * a10,
+        b03 = a01 * a12 - a02 * a11,
+        b04 = a01 * a13 - a03 * a11,
+        b05 = a02 * a13 - a03 * a12,
+        b06 = a20 * a31 - a21 * a30,
+        b07 = a20 * a32 - a22 * a30,
+        b08 = a20 * a33 - a23 * a30,
+        b09 = a21 * a32 - a22 * a31,
+        b10 = a21 * a33 - a23 * a31,
+        b11 = a22 * a33 - a23 * a32;
+
+    // Calculate the determinant
+    return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+};
+},{}],10:[function(require,module,exports){
+module.exports = fromQuat;
+
+/**
+ * Creates a matrix from a quaternion rotation.
+ *
+ * @param {mat4} out mat4 receiving operation result
+ * @param {quat4} q Rotation quaternion
+ * @returns {mat4} out
+ */
+function fromQuat(out, q) {
+    var x = q[0], y = q[1], z = q[2], w = q[3],
+        x2 = x + x,
+        y2 = y + y,
+        z2 = z + z,
+
+        xx = x * x2,
+        yx = y * x2,
+        yy = y * y2,
+        zx = z * x2,
+        zy = z * y2,
+        zz = z * z2,
+        wx = w * x2,
+        wy = w * y2,
+        wz = w * z2;
+
+    out[0] = 1 - yy - zz;
+    out[1] = yx + wz;
+    out[2] = zx - wy;
+    out[3] = 0;
+
+    out[4] = yx - wz;
+    out[5] = 1 - xx - zz;
+    out[6] = zy + wx;
+    out[7] = 0;
+
+    out[8] = zx + wy;
+    out[9] = zy - wx;
+    out[10] = 1 - xx - yy;
+    out[11] = 0;
+
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = 0;
+    out[15] = 1;
+
+    return out;
+};
+},{}],11:[function(require,module,exports){
+module.exports = fromRotationTranslation;
+
+/**
+ * Creates a matrix from a quaternion rotation and vector translation
+ * This is equivalent to (but much faster than):
+ *
+ *     mat4.identity(dest);
+ *     mat4.translate(dest, vec);
+ *     var quatMat = mat4.create();
+ *     quat4.toMat4(quat, quatMat);
+ *     mat4.multiply(dest, quatMat);
+ *
+ * @param {mat4} out mat4 receiving operation result
+ * @param {quat4} q Rotation quaternion
+ * @param {vec3} v Translation vector
+ * @returns {mat4} out
+ */
+function fromRotationTranslation(out, q, v) {
+    // Quaternion math
+    var x = q[0], y = q[1], z = q[2], w = q[3],
+        x2 = x + x,
+        y2 = y + y,
+        z2 = z + z,
+
+        xx = x * x2,
+        xy = x * y2,
+        xz = x * z2,
+        yy = y * y2,
+        yz = y * z2,
+        zz = z * z2,
+        wx = w * x2,
+        wy = w * y2,
+        wz = w * z2;
+
+    out[0] = 1 - (yy + zz);
+    out[1] = xy + wz;
+    out[2] = xz - wy;
+    out[3] = 0;
+    out[4] = xy - wz;
+    out[5] = 1 - (xx + zz);
+    out[6] = yz + wx;
+    out[7] = 0;
+    out[8] = xz + wy;
+    out[9] = yz - wx;
+    out[10] = 1 - (xx + yy);
+    out[11] = 0;
+    out[12] = v[0];
+    out[13] = v[1];
+    out[14] = v[2];
+    out[15] = 1;
+    
+    return out;
+};
+},{}],12:[function(require,module,exports){
+module.exports = frustum;
+
+/**
+ * Generates a frustum matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {Number} left Left bound of the frustum
+ * @param {Number} right Right bound of the frustum
+ * @param {Number} bottom Bottom bound of the frustum
+ * @param {Number} top Top bound of the frustum
+ * @param {Number} near Near bound of the frustum
+ * @param {Number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+function frustum(out, left, right, bottom, top, near, far) {
+    var rl = 1 / (right - left),
+        tb = 1 / (top - bottom),
+        nf = 1 / (near - far);
+    out[0] = (near * 2) * rl;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = (near * 2) * tb;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = (right + left) * rl;
+    out[9] = (top + bottom) * tb;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = (far * near * 2) * nf;
+    out[15] = 0;
+    return out;
+};
+},{}],13:[function(require,module,exports){
+module.exports = identity;
+
+/**
+ * Set a mat4 to the identity matrix
+ *
+ * @param {mat4} out the receiving matrix
+ * @returns {mat4} out
+ */
+function identity(out) {
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 1;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 1;
+    out[11] = 0;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = 0;
+    out[15] = 1;
+    return out;
+};
+},{}],14:[function(require,module,exports){
+module.exports = {
+  create: require('./create')
+  , clone: require('./clone')
+  , copy: require('./copy')
+  , identity: require('./identity')
+  , transpose: require('./transpose')
+  , invert: require('./invert')
+  , adjoint: require('./adjoint')
+  , determinant: require('./determinant')
+  , multiply: require('./multiply')
+  , translate: require('./translate')
+  , scale: require('./scale')
+  , rotate: require('./rotate')
+  , rotateX: require('./rotateX')
+  , rotateY: require('./rotateY')
+  , rotateZ: require('./rotateZ')
+  , fromRotationTranslation: require('./fromRotationTranslation')
+  , fromQuat: require('./fromQuat')
+  , frustum: require('./frustum')
+  , perspective: require('./perspective')
+  , perspectiveFromFieldOfView: require('./perspectiveFromFieldOfView')
+  , ortho: require('./ortho')
+  , lookAt: require('./lookAt')
+  , str: require('./str')
+}
+},{"./adjoint":5,"./clone":6,"./copy":7,"./create":8,"./determinant":9,"./fromQuat":10,"./fromRotationTranslation":11,"./frustum":12,"./identity":13,"./invert":15,"./lookAt":16,"./multiply":17,"./ortho":18,"./perspective":19,"./perspectiveFromFieldOfView":20,"./rotate":21,"./rotateX":22,"./rotateY":23,"./rotateZ":24,"./scale":25,"./str":26,"./translate":27,"./transpose":28}],15:[function(require,module,exports){
+module.exports = invert;
+
+/**
+ * Inverts a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+function invert(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
+
+        b00 = a00 * a11 - a01 * a10,
+        b01 = a00 * a12 - a02 * a10,
+        b02 = a00 * a13 - a03 * a10,
+        b03 = a01 * a12 - a02 * a11,
+        b04 = a01 * a13 - a03 * a11,
+        b05 = a02 * a13 - a03 * a12,
+        b06 = a20 * a31 - a21 * a30,
+        b07 = a20 * a32 - a22 * a30,
+        b08 = a20 * a33 - a23 * a30,
+        b09 = a21 * a32 - a22 * a31,
+        b10 = a21 * a33 - a23 * a31,
+        b11 = a22 * a33 - a23 * a32,
+
+        // Calculate the determinant
+        det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+
+    if (!det) { 
+        return null; 
+    }
+    det = 1.0 / det;
+
+    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+
+    return out;
+};
+},{}],16:[function(require,module,exports){
+var identity = require('./identity');
+
+module.exports = lookAt;
+
+/**
+ * Generates a look-at matrix with the given eye position, focal point, and up axis
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {vec3} eye Position of the viewer
+ * @param {vec3} center Point the viewer is looking at
+ * @param {vec3} up vec3 pointing up
+ * @returns {mat4} out
+ */
+function lookAt(out, eye, center, up) {
+    var x0, x1, x2, y0, y1, y2, z0, z1, z2, len,
+        eyex = eye[0],
+        eyey = eye[1],
+        eyez = eye[2],
+        upx = up[0],
+        upy = up[1],
+        upz = up[2],
+        centerx = center[0],
+        centery = center[1],
+        centerz = center[2];
+
+    if (Math.abs(eyex - centerx) < 0.000001 &&
+        Math.abs(eyey - centery) < 0.000001 &&
+        Math.abs(eyez - centerz) < 0.000001) {
+        return identity(out);
+    }
+
+    z0 = eyex - centerx;
+    z1 = eyey - centery;
+    z2 = eyez - centerz;
+
+    len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
+    z0 *= len;
+    z1 *= len;
+    z2 *= len;
+
+    x0 = upy * z2 - upz * z1;
+    x1 = upz * z0 - upx * z2;
+    x2 = upx * z1 - upy * z0;
+    len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+    if (!len) {
+        x0 = 0;
+        x1 = 0;
+        x2 = 0;
+    } else {
+        len = 1 / len;
+        x0 *= len;
+        x1 *= len;
+        x2 *= len;
+    }
+
+    y0 = z1 * x2 - z2 * x1;
+    y1 = z2 * x0 - z0 * x2;
+    y2 = z0 * x1 - z1 * x0;
+
+    len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+    if (!len) {
+        y0 = 0;
+        y1 = 0;
+        y2 = 0;
+    } else {
+        len = 1 / len;
+        y0 *= len;
+        y1 *= len;
+        y2 *= len;
+    }
+
+    out[0] = x0;
+    out[1] = y0;
+    out[2] = z0;
+    out[3] = 0;
+    out[4] = x1;
+    out[5] = y1;
+    out[6] = z1;
+    out[7] = 0;
+    out[8] = x2;
+    out[9] = y2;
+    out[10] = z2;
+    out[11] = 0;
+    out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+    out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+    out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+    out[15] = 1;
+
+    return out;
+};
+},{"./identity":13}],17:[function(require,module,exports){
+module.exports = multiply;
+
+/**
+ * Multiplies two mat4's
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the first operand
+ * @param {mat4} b the second operand
+ * @returns {mat4} out
+ */
+function multiply(out, a, b) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+    // Cache only the current line of the second matrix
+    var b0  = b[0], b1 = b[1], b2 = b[2], b3 = b[3];  
+    out[0] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+    out[4] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[5] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[6] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[7] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+    out[8] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[9] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[10] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[11] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+    out[12] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[13] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[14] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+    return out;
+};
+},{}],18:[function(require,module,exports){
+module.exports = ortho;
+
+/**
+ * Generates a orthogonal projection matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} left Left bound of the frustum
+ * @param {number} right Right bound of the frustum
+ * @param {number} bottom Bottom bound of the frustum
+ * @param {number} top Top bound of the frustum
+ * @param {number} near Near bound of the frustum
+ * @param {number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+function ortho(out, left, right, bottom, top, near, far) {
+    var lr = 1 / (left - right),
+        bt = 1 / (bottom - top),
+        nf = 1 / (near - far);
+    out[0] = -2 * lr;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = -2 * bt;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 2 * nf;
+    out[11] = 0;
+    out[12] = (left + right) * lr;
+    out[13] = (top + bottom) * bt;
+    out[14] = (far + near) * nf;
+    out[15] = 1;
+    return out;
+};
+},{}],19:[function(require,module,exports){
+module.exports = perspective;
+
+/**
+ * Generates a perspective projection matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} fovy Vertical field of view in radians
+ * @param {number} aspect Aspect ratio. typically viewport width/height
+ * @param {number} near Near bound of the frustum
+ * @param {number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+function perspective(out, fovy, aspect, near, far) {
+    var f = 1.0 / Math.tan(fovy / 2),
+        nf = 1 / (near - far);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = (2 * far * near) * nf;
+    out[15] = 0;
+    return out;
+};
+},{}],20:[function(require,module,exports){
+module.exports = perspectiveFromFieldOfView;
+
+/**
+ * Generates a perspective projection matrix with the given field of view.
+ * This is primarily useful for generating projection matrices to be used
+ * with the still experiemental WebVR API.
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} fov Object containing the following values: upDegrees, downDegrees, leftDegrees, rightDegrees
+ * @param {number} near Near bound of the frustum
+ * @param {number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+function perspectiveFromFieldOfView(out, fov, near, far) {
+    var upTan = Math.tan(fov.upDegrees * Math.PI/180.0),
+        downTan = Math.tan(fov.downDegrees * Math.PI/180.0),
+        leftTan = Math.tan(fov.leftDegrees * Math.PI/180.0),
+        rightTan = Math.tan(fov.rightDegrees * Math.PI/180.0),
+        xScale = 2.0 / (leftTan + rightTan),
+        yScale = 2.0 / (upTan + downTan);
+
+    out[0] = xScale;
+    out[1] = 0.0;
+    out[2] = 0.0;
+    out[3] = 0.0;
+    out[4] = 0.0;
+    out[5] = yScale;
+    out[6] = 0.0;
+    out[7] = 0.0;
+    out[8] = -((leftTan - rightTan) * xScale * 0.5);
+    out[9] = ((upTan - downTan) * yScale * 0.5);
+    out[10] = far / (near - far);
+    out[11] = -1.0;
+    out[12] = 0.0;
+    out[13] = 0.0;
+    out[14] = (far * near) / (near - far);
+    out[15] = 0.0;
+    return out;
+}
+
+
+},{}],21:[function(require,module,exports){
+module.exports = rotate;
+
+/**
+ * Rotates a mat4 by the given angle
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @param {vec3} axis the axis to rotate around
+ * @returns {mat4} out
+ */
+function rotate(out, a, rad, axis) {
+    var x = axis[0], y = axis[1], z = axis[2],
+        len = Math.sqrt(x * x + y * y + z * z),
+        s, c, t,
+        a00, a01, a02, a03,
+        a10, a11, a12, a13,
+        a20, a21, a22, a23,
+        b00, b01, b02,
+        b10, b11, b12,
+        b20, b21, b22;
+
+    if (Math.abs(len) < 0.000001) { return null; }
+    
+    len = 1 / len;
+    x *= len;
+    y *= len;
+    z *= len;
+
+    s = Math.sin(rad);
+    c = Math.cos(rad);
+    t = 1 - c;
+
+    a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+    a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+    a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+
+    // Construct the elements of the rotation matrix
+    b00 = x * x * t + c; b01 = y * x * t + z * s; b02 = z * x * t - y * s;
+    b10 = x * y * t - z * s; b11 = y * y * t + c; b12 = z * y * t + x * s;
+    b20 = x * z * t + y * s; b21 = y * z * t - x * s; b22 = z * z * t + c;
+
+    // Perform rotation-specific matrix multiplication
+    out[0] = a00 * b00 + a10 * b01 + a20 * b02;
+    out[1] = a01 * b00 + a11 * b01 + a21 * b02;
+    out[2] = a02 * b00 + a12 * b01 + a22 * b02;
+    out[3] = a03 * b00 + a13 * b01 + a23 * b02;
+    out[4] = a00 * b10 + a10 * b11 + a20 * b12;
+    out[5] = a01 * b10 + a11 * b11 + a21 * b12;
+    out[6] = a02 * b10 + a12 * b11 + a22 * b12;
+    out[7] = a03 * b10 + a13 * b11 + a23 * b12;
+    out[8] = a00 * b20 + a10 * b21 + a20 * b22;
+    out[9] = a01 * b20 + a11 * b21 + a21 * b22;
+    out[10] = a02 * b20 + a12 * b21 + a22 * b22;
+    out[11] = a03 * b20 + a13 * b21 + a23 * b22;
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged last row
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+    return out;
+};
+},{}],22:[function(require,module,exports){
+module.exports = rotateX;
+
+/**
+ * Rotates a matrix by the given angle around the X axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+function rotateX(out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a10 = a[4],
+        a11 = a[5],
+        a12 = a[6],
+        a13 = a[7],
+        a20 = a[8],
+        a21 = a[9],
+        a22 = a[10],
+        a23 = a[11];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged rows
+        out[0]  = a[0];
+        out[1]  = a[1];
+        out[2]  = a[2];
+        out[3]  = a[3];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[4] = a10 * c + a20 * s;
+    out[5] = a11 * c + a21 * s;
+    out[6] = a12 * c + a22 * s;
+    out[7] = a13 * c + a23 * s;
+    out[8] = a20 * c - a10 * s;
+    out[9] = a21 * c - a11 * s;
+    out[10] = a22 * c - a12 * s;
+    out[11] = a23 * c - a13 * s;
+    return out;
+};
+},{}],23:[function(require,module,exports){
+module.exports = rotateY;
+
+/**
+ * Rotates a matrix by the given angle around the Y axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+function rotateY(out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a00 = a[0],
+        a01 = a[1],
+        a02 = a[2],
+        a03 = a[3],
+        a20 = a[8],
+        a21 = a[9],
+        a22 = a[10],
+        a23 = a[11];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged rows
+        out[4]  = a[4];
+        out[5]  = a[5];
+        out[6]  = a[6];
+        out[7]  = a[7];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[0] = a00 * c - a20 * s;
+    out[1] = a01 * c - a21 * s;
+    out[2] = a02 * c - a22 * s;
+    out[3] = a03 * c - a23 * s;
+    out[8] = a00 * s + a20 * c;
+    out[9] = a01 * s + a21 * c;
+    out[10] = a02 * s + a22 * c;
+    out[11] = a03 * s + a23 * c;
+    return out;
+};
+},{}],24:[function(require,module,exports){
+module.exports = rotateZ;
+
+/**
+ * Rotates a matrix by the given angle around the Z axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+function rotateZ(out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a00 = a[0],
+        a01 = a[1],
+        a02 = a[2],
+        a03 = a[3],
+        a10 = a[4],
+        a11 = a[5],
+        a12 = a[6],
+        a13 = a[7];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged last row
+        out[8]  = a[8];
+        out[9]  = a[9];
+        out[10] = a[10];
+        out[11] = a[11];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[0] = a00 * c + a10 * s;
+    out[1] = a01 * c + a11 * s;
+    out[2] = a02 * c + a12 * s;
+    out[3] = a03 * c + a13 * s;
+    out[4] = a10 * c - a00 * s;
+    out[5] = a11 * c - a01 * s;
+    out[6] = a12 * c - a02 * s;
+    out[7] = a13 * c - a03 * s;
+    return out;
+};
+},{}],25:[function(require,module,exports){
+module.exports = scale;
+
+/**
+ * Scales the mat4 by the dimensions in the given vec3
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to scale
+ * @param {vec3} v the vec3 to scale the matrix by
+ * @returns {mat4} out
+ **/
+function scale(out, a, v) {
+    var x = v[0], y = v[1], z = v[2];
+
+    out[0] = a[0] * x;
+    out[1] = a[1] * x;
+    out[2] = a[2] * x;
+    out[3] = a[3] * x;
+    out[4] = a[4] * y;
+    out[5] = a[5] * y;
+    out[6] = a[6] * y;
+    out[7] = a[7] * y;
+    out[8] = a[8] * z;
+    out[9] = a[9] * z;
+    out[10] = a[10] * z;
+    out[11] = a[11] * z;
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+},{}],26:[function(require,module,exports){
+module.exports = str;
+
+/**
+ * Returns a string representation of a mat4
+ *
+ * @param {mat4} mat matrix to represent as a string
+ * @returns {String} string representation of the matrix
+ */
+function str(a) {
+    return 'mat4(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ', ' +
+                    a[4] + ', ' + a[5] + ', ' + a[6] + ', ' + a[7] + ', ' +
+                    a[8] + ', ' + a[9] + ', ' + a[10] + ', ' + a[11] + ', ' + 
+                    a[12] + ', ' + a[13] + ', ' + a[14] + ', ' + a[15] + ')';
+};
 },{}],27:[function(require,module,exports){
+module.exports = translate;
+
+/**
+ * Translate a mat4 by the given vector
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to translate
+ * @param {vec3} v vector to translate by
+ * @returns {mat4} out
+ */
+function translate(out, a, v) {
+    var x = v[0], y = v[1], z = v[2],
+        a00, a01, a02, a03,
+        a10, a11, a12, a13,
+        a20, a21, a22, a23;
+
+    if (a === out) {
+        out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+        out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+        out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+        out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+    } else {
+        a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+        a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+        a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+
+        out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+        out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+        out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+
+        out[12] = a00 * x + a10 * y + a20 * z + a[12];
+        out[13] = a01 * x + a11 * y + a21 * z + a[13];
+        out[14] = a02 * x + a12 * y + a22 * z + a[14];
+        out[15] = a03 * x + a13 * y + a23 * z + a[15];
+    }
+
+    return out;
+};
+},{}],28:[function(require,module,exports){
+module.exports = transpose;
+
+/**
+ * Transpose the values of a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+function transpose(out, a) {
+    // If we are transposing ourselves we can skip a few steps but have to cache some values
+    if (out === a) {
+        var a01 = a[1], a02 = a[2], a03 = a[3],
+            a12 = a[6], a13 = a[7],
+            a23 = a[11];
+
+        out[1] = a[4];
+        out[2] = a[8];
+        out[3] = a[12];
+        out[4] = a01;
+        out[6] = a[9];
+        out[7] = a[13];
+        out[8] = a02;
+        out[9] = a12;
+        out[11] = a[14];
+        out[12] = a03;
+        out[13] = a13;
+        out[14] = a23;
+    } else {
+        out[0] = a[0];
+        out[1] = a[4];
+        out[2] = a[8];
+        out[3] = a[12];
+        out[4] = a[1];
+        out[5] = a[5];
+        out[6] = a[9];
+        out[7] = a[13];
+        out[8] = a[2];
+        out[9] = a[6];
+        out[10] = a[10];
+        out[11] = a[14];
+        out[12] = a[3];
+        out[13] = a[7];
+        out[14] = a[11];
+        out[15] = a[15];
+    }
+    
+    return out;
+};
+},{}],29:[function(require,module,exports){
+arguments[4][2][0].apply(exports,arguments)
+},{"dup":2}],30:[function(require,module,exports){
 (function (global, factory) {
 	typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
 	typeof define === 'function' && define.amd ? define(factory) :
@@ -17950,7 +18054,7 @@ return wrapREGL;
 })));
 
 
-},{}],28:[function(require,module,exports){
+},{}],31:[function(require,module,exports){
 
 var mat4 = require('gl-mat4');
 
@@ -18032,51 +18136,92 @@ module.exports = function Trackball(element, opts) {
 
 }
 
-},{"gl-mat4":11}],29:[function(require,module,exports){
+},{"gl-mat4":14}],32:[function(require,module,exports){
 'use strict';
 
+const mat4 = require('gl-matrix').mat4;
 const vec3 = require('gl-matrix').vec3;
 
+module.exports = function(position, forward) {
 
-function node(sw, se, ne, nw) {
+  const pi = Math.PI;
 
-  const q = {};
-  q.sw = sw.slice();
-  q.se = se.slice();
-  q.nw = nw.slice();
-  q.ne = ne.slice();
+  position = position.slice();
+  forward = forward.slice();
 
-  q.right = vec3.scale([], vec3.sub([], q.se, q.sw), 0.5);
-  q.up = vec3.scale([], vec3.sub([], q.nw, q.sw), 0.5);
+  let right = [];
+  let up = [];
 
-  q.c = vec3.add([], vec3.add([], q.sw, q.right), q.up);
-  q.n = vec3.add([], q.nw, q.right);
-  q.s = vec3.add([], q.sw, q.right);
-  q.e = vec3.add([], q.se, q.up);
-  q.w = vec3.add([], q.sw, q.up);
+  let phi = 0;
 
-  return q;
+  normalize();
 
-}
+  function dump() {
+    return {
+      position: position.slice(),
+      forward: forward.slice(),
+    };
+  }
 
+  function normalize() {
+    up = vec3.normalize([], position);
+    forward = vec3.normalize(forward, forward);
+    vec3.cross(right, forward, up);
+    vec3.cross(forward, up, right);
+  }
 
-function traverse(q, test, depth) {
+  function lookRight(delta) {
+    const rotAroundUp = mat4.rotate([], mat4.create(), -delta, up);
+    vec3.transformMat4(forward, forward, rotAroundUp);
+    normalize();
+  }
 
-  depth = depth === undefined ? 0 : depth;
+  function lookUp(delta) {
+    phi += delta;
+    phi = Math.min(Math.max(-0.99 * pi/2, phi), 0.99 * pi/2);
+  }
 
-  if (test(q, depth)) {
-    traverse(node(q.sw, q.s, q.c, q.w), test, depth + 1);
-    traverse(node(q.s, q.se, q.e, q.c), test, depth + 1);
-    traverse(node(q.c, q.e, q.ne, q.n), test, depth + 1);
-    traverse(node(q.w, q.c, q.n, q.nw), test, depth + 1);
+  function moveForward(delta) {
+    vec3.add(position, position, vec3.scale([], forward, delta));
+    normalize();
+  }
+
+  function moveUp(delta) {
+    vec3.add(position, position, vec3.scale([], up, delta));
+    normalize();
+  }
+
+  function moveRight(delta) {
+    vec3.add(position, position, vec3.scale([], right, delta));
+    normalize();
+  }
+
+  function getView(zero) {
+    normalize();
+    const rotAroundRight = mat4.rotate([], mat4.create(), phi, right);
+    const f = vec3.transformMat4([], forward, rotAroundRight);
+    if (zero) {
+      return mat4.lookAt([], [0,0,0], f, up);
+    }
+    const center = vec3.add([], position, f);
+    return mat4.lookAt([], position, center, up);
+  }
+
+  function getPosition() {
+    return position.slice();
+  }
+
+  return {
+    getView: getView,
+    getPosition: getPosition,
+    lookRight: lookRight,
+    lookUp: lookUp,
+    moveForward: moveForward,
+    moveUp: moveUp,
+    moveRight: moveRight,
+    dump: dump,
   }
 
 }
 
-
-module.exports = {
-  node: node,
-  traverse: traverse,
-};
-
-},{"gl-matrix":26}]},{},[1]);
+},{"gl-matrix":29}]},{},[4]);

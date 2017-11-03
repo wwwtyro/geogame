@@ -6,6 +6,7 @@ const download = require('download');
 const vec3 = require('gl-matrix').vec3
 const getpixels = require('get-pixels');
 const quadtree = require('../quadtree');
+const sqlite3 = require('sqlite3').verbose();
 
 const PI = Math.PI;
 const TIFSIZE = 10800;
@@ -23,6 +24,14 @@ let tileCache = {};
 main();
 
 async function main() {
+
+  const db = new sqlite3.Database('nodes.sqlite3');
+  db.serialize(function() {
+    db.run(`CREATE TABLE IF NOT EXISTS nodes (id VARCHAR, node TEXT);`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idindex ON nodes (id);`);
+    db.run(`PRAGMA synchronous=OFF;`);
+  });
+
 
   if (!fs.existsSync('tifs')){
     fs.mkdirSync('tifs');
@@ -134,13 +143,17 @@ async function main() {
     )
   ];
 
-  if (!fs.existsSync('nodes')){
-    fs.mkdirSync('nodes');
-  }
+  // if (!fs.existsSync('nodes')){
+  //   fs.mkdirSync('nodes');
+  // }
+
+  // const db = new sqlite3.Database('nodes.sqlite3');
+  // db.run(`CREATE TABLE IF NOT EXISTS foo (id VARCHAR, node TEXT);`);
+
 
   for (let x = 0; x < WIDTH; x += TILESIZE) {
     for (let y = 0; y < HEIGHT; y+= TILESIZE) {
-      console.log(x, y);
+      console.log('caching tile', x, y);
       tileCache[[x,y]] = await loadTile(x, y);
     }
   }
@@ -148,20 +161,20 @@ async function main() {
   for (let root of sphere) {
     // tileCache = {};
     quadtree.traverse_async(root, async function(node, depth) {
-      if (!fs.existsSync(`nodes/${node.id}`)) {
+      return new Promise(async function(resolve, reject) {
         console.log(`Storing node ${node.id}...`);
-        await storeNode(node);
-      }
-      if (depth === 6) {
-        return false;
-      }
-      return true;
+        await storeNode(node, db);
+        if (depth === 6) {
+          resolve(false);
+        }
+        resolve(true);
+      });
     });
   }
 
 }
 
-async function storeNode(node) {
+async function storeNode(node, db) {
   const right = vec3.scale([], node.right, 2/NODERES);
   const up = vec3.scale([], node.up, 2/NODERES);
   const elevations = create2DArray(NODERES + 1, NODERES + 1);
@@ -171,11 +184,12 @@ async function storeNode(node) {
       elevations[i][j] = Math.round(e);
     }
   }
-  fs.writeFileSync(`nodes/${node.id}.json`, JSON.stringify({
+  const nodeson = JSON.stringify({
     id: node.id,
     resolution: NODERES,
     elevations: elevations,
-  }));
+  });
+  db.run(`INSERT OR REPLACE INTO nodes (id, node) VALUES ('${node.id}', '${nodeson}');`);
 }
 
 
