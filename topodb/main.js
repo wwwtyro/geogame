@@ -6,7 +6,7 @@ const download = require('download');
 const vec3 = require('gl-matrix').vec3
 const getpixels = require('get-pixels');
 const quadtree = require('../quadtree');
-const sqlite3 = require('sqlite3').verbose();
+const sqlite3 = require('better-sqlite3');
 
 const PI = Math.PI;
 const TIFSIZE = 10800;
@@ -25,13 +25,10 @@ main();
 
 async function main() {
 
-  const db = new sqlite3.Database('nodes.sqlite3');
-  db.serialize(function() {
-    db.run(`CREATE TABLE IF NOT EXISTS nodes (id VARCHAR, node TEXT);`);
-    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idindex ON nodes (id);`);
-    db.run(`PRAGMA synchronous=OFF;`);
-  });
-
+  const db = new sqlite3('nodes.sqlite3');
+  db.prepare(`CREATE TABLE IF NOT EXISTS nodes (id VARCHAR, node TEXT);`).run();
+  db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idindex ON nodes (id);`).run();
+  db.pragma(`synchronous=OFF;`);
 
   if (!fs.existsSync('tifs')){
     fs.mkdirSync('tifs');
@@ -164,7 +161,7 @@ async function main() {
       return new Promise(async function(resolve, reject) {
         console.log(`Storing node ${node.id}...`);
         await storeNode(node, db);
-        if (depth === 6) {
+        if (depth === 9) {
           resolve(false);
         }
         resolve(true);
@@ -189,7 +186,7 @@ async function storeNode(node, db) {
     resolution: NODERES,
     elevations: elevations,
   });
-  db.run(`INSERT OR REPLACE INTO nodes (id, node) VALUES ('${node.id}', '${nodeson}');`);
+  db.prepare(`INSERT OR REPLACE INTO nodes (id, node) VALUES (?, ?);`).run(node.id, nodeson);
 }
 
 

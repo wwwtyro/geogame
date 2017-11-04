@@ -4,17 +4,16 @@
   "description": "",
   "main": "main.js",
   "scripts": {
-    "start": "node main.js",
-    "prof": "node -prof main.js"
+    "start": "node main.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "better-sqlite3": "^4.0.3",
     "download": "^6.2.5",
     "express": "^4.16.2",
     "get-pixels": "^3.3.0",
     "gl-matrix": "^2.4.0",
-    "sqlite3": "^3.1.13"
   }
 }
