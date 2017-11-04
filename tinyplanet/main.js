@@ -13,7 +13,7 @@ const meshWorker = new Worker('build/bundled-worker.js');
 const cache = require('./cache');
 
 const earthRadius = 6371000; // meters
-const vScale = 2.0;
+const vScale = 1.0;
 
 main();
 
@@ -159,9 +159,6 @@ async function main() {
         );
         const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
         if (dist > radius * 2) {
-          if (node.id === 'px-' || node.id === 'py-' || node.id === 'pz-' || node.id === 'nx-' || node.id === 'ny-' || node.id === 'nz-') {
-            return false;
-          }
           const available = nodeCache.get(node.id);
           if (available) {
             nodes.push({
@@ -324,10 +321,7 @@ async function main() {
   });
 
   let altitude = 1000;
-  const camData = JSON.parse(localStorage.getItem('camData')) || {
-    position: [0,getElevation([0,1,0]) + altitude + earthRadius,0],
-    forward: [0,0,-1]
-  };
+  const camData = JSON.parse(localStorage.camData || `{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
   const cam = SphereFPSCam(camData.position, camData.forward);
 
   setInterval(function() {
@@ -447,46 +441,6 @@ async function main() {
 
     regl.clear({
       color: [65/255,168/255,255/255,1],
-      depth: 1,
-    });
-
-    // First, render the root nodes.
-    const rootNodes = [];
-    for (let node of sphere) {
-      const available = nodeCache.get(node.id);
-      if (available) {
-        rootNodes.push({
-          node: node,
-          enode: available
-        });
-      }
-    }
-    const rootMeshes = [];
-    for (let node of rootNodes) {
-      rootMeshes.push(getMesh(node.node, node.enode));
-    }
-    for (let mesh of rootMeshes) {
-      if (mesh === null) continue;
-      const translation = vec3.sub([], mesh.offset, cam.getPosition());
-      const model = mat4.fromTranslation([], translation);
-      render({
-        model: model,
-        view: view,
-        projection: projection,
-        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-        positions: mesh.positions,
-        normals: mesh.normals,
-        uvs: mesh.uvs,
-        colors: mesh.colors,
-        bc: mesh.bc,
-        light: vec3.normalize([], cam.getPosition()),
-        count: mesh.count
-      });
-    }
-
-
-    // Now overdraw with whatever we can get.
-    regl.clear({
       depth: 1,
     });
 
