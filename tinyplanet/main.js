@@ -8,7 +8,7 @@ const SphereFPSCam = require('./sphere-fps-cam');
 const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
 
-const meshWorker = new Worker('build/bundled-worker.js');
+const meshWorker = new Worker('bundled-worker.js');
 
 const cache = require('./cache');
 
@@ -322,7 +322,7 @@ async function main() {
 
   let altitude = 1000;
   const camData = JSON.parse(localStorage.camData || `{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
-  const cam = SphereFPSCam(camData.position, camData.forward);
+  let cam = SphereFPSCam(camData.position, camData.forward);
 
   setInterval(function() {
     localStorage.setItem('camData', JSON.stringify(cam.dump()));
@@ -471,14 +471,26 @@ async function main() {
       });
     }
 
-    document.getElementById('info').innerText = `Altitude: ${Math.round(altitude)} meters`;
+    document.getElementById('alt').innerText = `Altitude: ${Math.round(altitude)} meters`;
 
     requestAnimationFrame(loop);
   }
 
   requestAnimationFrame(loop);
 
+  document.getElementById('btn-grand-canyon').addEventListener('click', function() {
+    const tmpData = JSON.parse(`{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
+    cam = SphereFPSCam(tmpData.position, tmpData.forward);
+    altitude = 1000;
+  });
+  document.getElementById('btn-mount-fuji').addEventListener('click', function() {
+    const tmpData = JSON.parse(`{"position":[3415253.5791660026,3666853.214765183,-3937219.288570469],"forward":[0.32296984203460627,0.536401617569623,0.7797203253762426]}`);
+    cam = SphereFPSCam(tmpData.position, tmpData.forward);
+    altitude = 1000;
+  });
+
 }
+
 
 
 function loadImage(src) {

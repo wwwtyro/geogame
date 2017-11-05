@@ -26,11 +26,15 @@
       position: fixed;
       top: 0px;
       padding: 8px;
-      background: black;
-      color: yellow;
-      width: 100%;
-      text-align: center;
-      font-size: 2em;
+      background: rgba(0,0,0,0.5);
+      color: white;
+    }
+
+    .location {
+      color: white;
+      text-decoration: underline;
+      margin-top: 8px;
+      cursor: pointer;
     }
 
   </style>
@@ -39,6 +43,11 @@
 
     <canvas id='render-canvas'></canvas>
     <canvas id='map'></canvas>
+    <div id='info'>
+      <div id='alt'></div>
+      <div class='location' id='btn-grand-canyon'>Grand Canyon</div>
+      <div class='location' id='btn-mount-fuji'>Mount Fuji</div>
+    </div>
 
   </body>
 

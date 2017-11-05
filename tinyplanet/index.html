@@ -30,14 +30,25 @@
       color: white;
     }
 
+    .location {
+      color: white;
+      text-decoration: underline;
+      margin-top: 8px;
+      cursor: pointer;
+    }
+
   </style>
 
   <body>
 
     <canvas id='render-canvas'></canvas>
     <canvas id='map'></canvas>
-    <div id='info'></div>
-    
+    <div id='info'>
+      <div id='alt'></div>
+      <div class='location' id='btn-grand-canyon'>Grand Canyon</div>
+      <div class='location' id='btn-mount-fuji'>Mount Fuji</div>
+    </div>
+
   </body>
 
 </html>
