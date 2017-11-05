@@ -255,7 +255,11 @@ async function main() {
 
   const regl = REGL({
     canvas: canvas,
+    extensions: ['EXT_frag_depth'],
   });
+
+  let a = regl._gl.getExtension('EXT_frag_depth');
+
 
   const texture = regl.texture({
     data: texture_img,
@@ -272,20 +276,26 @@ async function main() {
       uniform mat4 model, view, projection;
       varying vec3 vBC, vColor, vNormal;
       varying vec2 vUV;
+      varying float flogz;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
+        float Fcoef = 2.0 / log2(10000000.0 + 1.0);
+        gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
         vBC = bc;
         vColor = color;
         vNormal = normal;//vec3(model * vec4(normal, 1));
         vUV = uv;
+        flogz = 1.0 + gl_Position.w;
       }
     `,
     frag: `
+      #extension GL_EXT_frag_depth : enable
       precision highp float;
       uniform sampler2D texture;
       uniform vec3 light;
       varying vec3 vBC, vColor, vNormal;
       varying vec2 vUV;
+      varying float flogz;
 
       vec3 saturate(vec3 c, float delta) {
         float p = sqrt(c.r*c.r*0.299 + c.g*c.g*0.587 + c.b*c.b*0.114);
@@ -296,6 +306,8 @@ async function main() {
         float t = texture2D(texture, vUV).r;
         float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
         gl_FragColor = vec4(saturate(vColor * l * t * t, 1.0), 1.0);
+        float Fcoef_half = 1.0 / log2(10000000.0 + 1.0);
+        gl_FragDepthEXT = log2(flogz) * Fcoef_half;
       }
     `,
     attributes: {
@@ -437,7 +449,7 @@ async function main() {
 
 
     const view = cam.getView(true);
-    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, 1, 10000000);
+    const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, -1, 1);
 
     regl.clear({
       color: [65/255,168/255,255/255,1],

@@ -13,6 +13,10 @@ async function main() {
     const node = e.data.node;
     const enode = e.data.enode;
 
+    const swsc = vec3.scale([], vec3.normalize([], node.sw), earthRadius);
+    const sesc = vec3.scale([], vec3.normalize([], node.se), earthRadius);
+    const skirt = vec3.length(vec3.sub([], swsc, sesc)) * 0.1;
+
     const res = enode.resolution;
 
     const right = vec3.scale([], node.right, 2/res);
@@ -21,18 +25,41 @@ async function main() {
 
     const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
 
-    for (let i = 0; i < res; i++) {
-      for (let j = 0; j < res; j++) {
+    for (let i = -1; i <= res; i++) {
+      for (let j = -1; j <= res; j++) {
 
-        let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
-        let b = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 0));
-        let c = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 1));
-        let d = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 1));
+        let ii, jj;
+        ii = i === -1 ? 0 : i;
+        ii = i === res ? res - 1 : ii;
+        jj = j === -1 ? 0 : j;
+        jj = j === res ? res - 1 : jj;
 
-        const ea = enode.elevations[i+0][j+0];
-        const eb = enode.elevations[i+1][j+0];
-        const ec = enode.elevations[i+1][j+1];
-        const ed = enode.elevations[i+0][j+1];
+        let a = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, ii + 0)), vec3.scale([], up, jj + 0));
+        let b = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, ii + 1)), vec3.scale([], up, jj + 0));
+        let c = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, ii + 1)), vec3.scale([], up, jj + 1));
+        let d = vec3.add([], vec3.add([], node.sw, vec3.scale([], right, ii + 0)), vec3.scale([], up, jj + 1));
+
+        let ea = enode.elevations[ii+0][jj+0];
+        let eb = enode.elevations[ii+1][jj+0];
+        let ec = enode.elevations[ii+1][jj+1];
+        let ed = enode.elevations[ii+0][jj+1];
+
+        if (i === -1) {
+          ea -= skirt;
+          ed -= skirt;
+        }
+        if (j === -1) {
+          ea -= skirt;
+          eb -= skirt;
+        }
+        if (i === res) {
+          eb -= skirt;
+          ec -= skirt;
+        }
+        if (j === res) {
+          ec -= skirt;
+          ed -= skirt;
+        }
 
         const ma = vec3.scale([], vec3.normalize([], a), vScale * ea + earthRadius);
         const mb = vec3.scale([], vec3.normalize([], b), vScale * eb + earthRadius);
@@ -80,10 +107,10 @@ async function main() {
         uvs.push(uvc);
         uvs.push(uvd);
 
-        const ca = vec3.scale([], enode.color[i+0][j+0], 1/255);
-        const cb = vec3.scale([], enode.color[i+1][j+0], 1/255);
-        const cc = vec3.scale([], enode.color[i+1][j+1], 1/255);
-        const cd = vec3.scale([], enode.color[i+0][j+1], 1/255);
+        const ca = vec3.scale([], enode.color[ii+0][jj+0], 1/255);
+        const cb = vec3.scale([], enode.color[ii+1][jj+0], 1/255);
+        const cc = vec3.scale([], enode.color[ii+1][jj+1], 1/255);
+        const cd = vec3.scale([], enode.color[ii+0][jj+1], 1/255);
         let cabc = vec3.scale([], vec3.add([], ca, vec3.add([], cb, cc)), 1/3);
         let cacd = vec3.scale([], vec3.add([], ca, vec3.add([], cc, cd)), 1/3);
         colors.push(cabc);
