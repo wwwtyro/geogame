@@ -13,6 +13,8 @@ async function main() {
     const node = e.data.node;
     const enode = e.data.enode;
 
+    const nup = vec3.normalize([], node.c);
+
     const swsc = vec3.scale([], vec3.normalize([], node.sw), earthRadius);
     const sesc = vec3.scale([], vec3.normalize([], node.se), earthRadius);
     const skirt = vec3.length(vec3.sub([], swsc, sesc)) * 0.1;
@@ -82,18 +84,27 @@ async function main() {
         vec3.max(bounds.max, bounds.max, mc);
         vec3.max(bounds.max, bounds.max, md);
 
-        let ab = vec3.normalize([], vec3.sub([], mb, ma));
-        let ac = vec3.normalize([], vec3.sub([], mc, ma));
-        let n = vec3.cross([], ab, ac);
-        normals.push(n);
-        normals.push(n);
-        normals.push(n);
+        if (i === -1 || j === -1 || i === res || j === res) {
+          normals.push(nup);
+          normals.push(nup);
+          normals.push(nup);
+          normals.push(nup);
+          normals.push(nup);
+          normals.push(nup);
+        } else {
+          let ab = vec3.normalize([], vec3.sub([], mb, ma));
+          let ac = vec3.normalize([], vec3.sub([], mc, ma));
+          let n = vec3.cross([], ab, ac);
+          normals.push(n);
+          normals.push(n);
+          normals.push(n);
+          let ad = vec3.normalize([], vec3.sub([], md, ma));
+          n = vec3.cross([], ac, ad);
+          normals.push(n);
+          normals.push(n);
+          normals.push(n);
+        }
 
-        let ad = vec3.normalize([], vec3.sub([], md, ma));
-        n = vec3.cross([], ac, ad);
-        normals.push(n);
-        normals.push(n);
-        normals.push(n);
 
         const uva = [4 * (i + 0) / res, 4 * (j + 0) / res];
         const uvb = [4 * (i + 1) / res, 4 * (j + 0) / res];

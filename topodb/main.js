@@ -140,14 +140,6 @@ async function main() {
     )
   ];
 
-  // if (!fs.existsSync('nodes')){
-  //   fs.mkdirSync('nodes');
-  // }
-
-  // const db = new sqlite3.Database('nodes.sqlite3');
-  // db.run(`CREATE TABLE IF NOT EXISTS foo (id VARCHAR, node TEXT);`);
-
-
   for (let x = 0; x < WIDTH; x += TILESIZE) {
     for (let y = 0; y < HEIGHT; y+= TILESIZE) {
       console.log('caching tile', x, y);
@@ -220,15 +212,30 @@ function loadTile(x, y) {
   });
 }
 
-async function elevation(p) {
-  let pixel = getPixel(p);
-  const offx = TILESIZE * Math.floor(pixel.x/TILESIZE);
-  const offy = TILESIZE * Math.floor(pixel.y/TILESIZE);
+async function pixelValue(p) {
+  const offx = TILESIZE * Math.floor(p.x/TILESIZE);
+  const offy = TILESIZE * Math.floor(p.y/TILESIZE);
   if (!([offx, offy] in tileCache)) {
     tileCache[[offx, offy]] = await loadTile(offx, offy);
   }
   const tile = tileCache[[offx, offy]];
-  return 8848 * tile.get(Math.floor(pixel.x) - offx, Math.floor(pixel.y) - offy, 0)/255;
+  return 8848 * tile.get(Math.floor(p.x) - offx, Math.floor(p.y) - offy, 0)/255;
+}
+
+async function elevation(p) {
+  let p0 = getPixel(p);
+  let p1 = {x: (p0.x + 1) % WIDTH, y: p0.y};
+  let p2 = {x: (p0.x + 1) % WIDTH, y: Math.max(p0.y - 1, 0)};
+  let p3 = {x: p0.x, y: Math.max(p0.y - 1, 0)};
+  let v0 = await pixelValue(p0);
+  // let v1 = await pixelValue(p1);
+  // let v2 = await pixelValue(p2);
+  // let v3 = await pixelValue(p3);
+  // let x1 = v0 + (p0.x % 1) * (v1 - v0);
+  // let x2 = v2 + (p0.x % 1) * (v2 - v3);
+  // let e = x1 + (1 - p0.y % 1) * (x2 - x1);
+  // return e;
+  return v0;
 }
 
 

@@ -14,6 +14,7 @@ const cache = require('./cache');
 
 const earthRadius = 6371000; // meters
 const vScale = 1.0;
+const MAX_DEPTH = 9;
 
 main();
 
@@ -125,7 +126,7 @@ async function main() {
   }
 
   function getElevation(p, depth) {
-    depth = 9;
+    depth = MAX_DEPTH;
     const root = getTreeFace(p);
     const pu = unprojectPoint(p, root);
     const node = getTreeNode(p, depth);
@@ -168,7 +169,7 @@ async function main() {
           }
           return false;
         }
-        if (depth === 9) {
+        if (depth === MAX_DEPTH) {
           const available = nodeCache.get(node.id);
           if (available) {
             nodes.push({
@@ -279,7 +280,7 @@ async function main() {
       varying float flogz;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
-        float Fcoef = 2.0 / log2(10000000.0 + 1.0);
+        float Fcoef = 2.0 / log2(100000000.0 + 1.0);
         gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
         vBC = bc;
         vColor = color;
@@ -306,7 +307,7 @@ async function main() {
         float t = texture2D(texture, vUV).r;
         float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
         gl_FragColor = vec4(saturate(vColor * l * t * t, 1.0), 1.0);
-        float Fcoef_half = 1.0 / log2(10000000.0 + 1.0);
+        float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
         gl_FragDepthEXT = log2(flogz) * Fcoef_half;
       }
     `,
@@ -404,7 +405,7 @@ async function main() {
       altitude *= 0.9;
     }
 
-    altitude = Math.min(Math.max(altitude, 1), 1000000);
+    altitude = Math.min(Math.max(altitude, 1), 10000000);
 
     if (keyboard.up) {
       cam.moveForward(speed * altitude);
