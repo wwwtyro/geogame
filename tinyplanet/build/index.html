@@ -19,12 +19,13 @@
       position: fixed;
       top: 8px;
       right: 8px;
-      border: 3px solid white;
+      opacity: 0.5;
     }
 
     #info {
       position: fixed;
-      top: 0px;
+      top: 8px;
+      left: 8px;
       padding: 8px;
       background: rgba(0,0,0,0.5);
       color: white;
@@ -45,6 +46,10 @@
     <canvas id='map'></canvas>
     <div id='info'>
       <div id='alt'></div>
+      <div id='cached-nodes'></div>
+      <div id='inflight-nodes'></div>
+      <div id='cached-meshes'></div>
+      <div id='inflight-meshes'></div>
       <div class='location' id='btn-grand-canyon'>Grand Canyon</div>
       <div class='location' id='btn-mount-fuji'>Mount Fuji</div>
     </div>
