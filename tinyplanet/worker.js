@@ -17,7 +17,7 @@ async function main() {
 
     const swsc = vec3.scale([], vec3.normalize([], node.sw), earthRadius);
     const sesc = vec3.scale([], vec3.normalize([], node.se), earthRadius);
-    const skirt = vec3.length(vec3.sub([], swsc, sesc)) * 0.1;
+    const skirt = vec3.length(vec3.sub([], swsc, sesc)) * 0.01;
 
     const res = enode.resolution;
 
@@ -46,22 +46,28 @@ async function main() {
         let ec = enode.elevations[ii+1][jj+1];
         let ed = enode.elevations[ii+0][jj+1];
 
+        let tea=0,teb=0,tec=0,ted=0;
         if (i === -1) {
-          ea -= skirt;
-          ed -= skirt;
+          tea = -skirt;
+          ted = -skirt;
         }
         if (j === -1) {
-          ea -= skirt;
-          eb -= skirt;
+          tea = -skirt;
+          teb = -skirt;
         }
         if (i === res) {
-          eb -= skirt;
-          ec -= skirt;
+          teb = -skirt;
+          tec = -skirt;
         }
         if (j === res) {
-          ec -= skirt;
-          ed -= skirt;
+          tec = -skirt;
+          ted = -skirt;
         }
+
+        ea += tea;
+        eb += teb;
+        ec += tec;
+        ed += ted;
 
         const ma = vec3.scale([], vec3.normalize([], a), vScale * ea + earthRadius);
         const mb = vec3.scale([], vec3.normalize([], b), vScale * eb + earthRadius);
@@ -138,13 +144,6 @@ async function main() {
       vec3.sub(positions[i], positions[i], bounds.center);
     }
 
-    const bc = [];
-    for (let i = 0; i < positions.length/3; i++) {
-      bc.push([1,0,0]);
-      bc.push([0,1,0]);
-      bc.push([0,0,1]);
-    }
-
     postMessage({
       node: node,
       offset: bounds.center,
@@ -152,7 +151,6 @@ async function main() {
       colors: colors,
       uvs: uvs,
       normals: normals,
-      bc: bc,
       count: positions.length,
     });
 

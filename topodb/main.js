@@ -232,7 +232,10 @@ async function elevation(p) {
   // let v2 = await pixelValue(p2);
   // let v3 = await pixelValue(p3);
   // let x1 = v0 + (p0.x % 1) * (v1 - v0);
+  // OOPS MESSED THIS UP. THIS LINE:
   // let x2 = v2 + (p0.x % 1) * (v2 - v3);
+  // SHOULD BE THIS:
+  // let x2 = v3 + (p0.x % 1) * (v2 - v3);
   // let e = x1 + (1 - p0.y % 1) * (x2 - x1);
   // return e;
   return v0;

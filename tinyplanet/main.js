@@ -3,6 +3,7 @@
 const REGL = require('regl');
 const glMatrix = require('gl-matrix');
 const Trackball = require('trackball-controller');
+const Sphere = require('icosphere');
 const quadtree = require('../quadtree');
 const SphereFPSCam = require('./sphere-fps-cam');
 const mat4 = glMatrix.mat4;
@@ -141,10 +142,24 @@ async function main() {
     const swpu = vec3.sub([], pu, sw);
     const compright = vec3.dot(swpu, rightn)/(vec3.length(right) * 2);
     const compup = vec3.dot(swpu, upn)/(vec3.length(up) * 2);
-    return vScale * enode.elevations[Math.round(compright * res)][Math.round(compup * res)];
+    const p0 = [Math.floor(compright * res), Math.floor(compup * res)];
+    const p1 = [p0[0] + 1, p0[1] + 0];
+    const p2 = [p0[0] + 1, p0[1] + 1];
+    const p3 = [p0[0] + 0, p0[1] + 1];
+    const v0 = enode.elevations[p0[0]][p0[1]];
+    const v1 = enode.elevations[p1[0]][p1[1]];
+    const v2 = enode.elevations[p2[0]][p2[1]];
+    const v3 = enode.elevations[p3[0]][p3[1]];
+    return vScale * Math.max(v0, Math.max(v1, Math.max(v2, v3)));
+    const fright = compright * res - p0[0];
+    const fup = compup * res - p0[1];
+    const vx0 = v0 + fright * (v1 - v0);
+    const vx1 = v3 + fright * (v2 - v3);
+    const vy = vx0 + fup * (vx1 - vx0);
+    return vScale * vy;
   }
 
-  function getAvailableNodes(p) {
+  function getRequiredNodes(p) {
     const nodes = [];
     for (let root of sphere) {
       quadtree.traverse(root, function(node, depth) {
@@ -159,24 +174,12 @@ async function main() {
           )
         );
         const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
-        if (dist > radius * 2) {
-          const available = nodeCache.get(node.id);
-          if (available) {
-            nodes.push({
-              node: node,
-              enode: available,
-            });
-          }
+        if (dist > radius * 1.3) {
+          nodes.push(node);
           return false;
         }
         if (depth === MAX_DEPTH) {
-          const available = nodeCache.get(node.id);
-          if (available) {
-            nodes.push({
-              node: node,
-              enode: available,
-            });
-          }
+          nodes.push(node);
           return false;
         }
         return true;
@@ -186,51 +189,96 @@ async function main() {
   }
 
   const terrainMeshes = {};
-  const vertexCache = {};
-  const colorCache = {};
-
-  function getVertex(p) {
-    if (!(p in vertexCache)) {
-      vertexCache[p] = vec3.scale([], vec3.normalize([], p), getElevation(p) + earthRadius);
-    }
-    return vertexCache[p].slice();
-  }
-
-
-  function getColor(p) {
-    if (!(p in colorCache)) {
-      colorCache[p] = color(p);
-    }
-    return colorCache[p].slice();
-  }
-
   const terrainMeshesInFlight = {};
-
   const workerQueue = [];
 
   meshWorker.onmessage = function(e) {
     workerQueue.push(e.data);
   }
 
-  function getMesh(node, enode) {
-    if (!(node.id in terrainMeshes)) {
-      if (node.id in terrainMeshesInFlight) {
-        return null;
-      }
-      if (Object.keys(terrainMeshesInFlight).length > 0) {
-        return null;
-      }
-      terrainMeshesInFlight[node.id] = true;
-      meshWorker.postMessage({
-        node: node,
-        enode: enode,
-        vScale: vScale,
-        earthRadius: earthRadius,
-      });
-      return null;
-      // terrainMeshes[node.id] = buildMesh(node, enode);
+  function getMesh(node) {
+    if (node.id in terrainMeshes) {
+      terrainMeshes[node.id].timestamp = performance.now();
+      return terrainMeshes[node.id];
     }
-    return terrainMeshes[node.id];
+    if (node.id in terrainMeshesInFlight) {
+      return null;
+    }
+    const nodeData = nodeCache.get(node.id);
+    if (!nodeData) {
+      return null;
+    }
+    if (Object.keys(terrainMeshesInFlight).length > 1) {
+      return null;
+    }
+    terrainMeshesInFlight[node.id] = true;
+    meshWorker.postMessage({
+      node: node,
+      enode: nodeData,
+      vScale: vScale,
+      earthRadius: earthRadius,
+    });
+    return null;
+  }
+
+  function fetchMeshes(p) {
+    const nodes = getRequiredNodes(p);
+    nodes.sort(function(a, b) {
+      const ca = vec3.scale([], vec3.normalize([], a.c), earthRadius);
+      const cb = vec3.scale([], vec3.normalize([], b.c), earthRadius);
+      const da = vec3.distance(p, ca);
+      const db = vec3.distance(p, cb);
+      return da - db;
+    });
+    const tempMeshes = [];
+    for (let node of nodes) {
+      if (node.id.length <= 3) continue;
+      let parentid = node.id.slice(0, node.id.length - 1);
+      const siblings = ['a', 'b', 'c', 'd'];
+      let haveAll = true;
+      for (let sibling of siblings) {
+        const id = parentid + sibling;
+        if (!(id in terrainMeshes)) {
+          haveAll = false;
+          break;
+        }
+      }
+      if (haveAll) continue;
+      while(!(parentid in terrainMeshes) && parentid.length > 3) {
+        parentid = parentid.slice(0, parentid.length - 1);
+      }
+      if (parentid in terrainMeshes) {
+        tempMeshes.push(terrainMeshes[parentid]);
+      }
+    }
+    const meshes = [];
+    for (let node of nodes) {
+      const mesh = getMesh(node);
+      if (mesh) {
+        meshes.push(mesh);
+      }
+    }
+    return {
+      meshes: meshes,
+      tempMeshes: tempMeshes,
+    }
+  }
+
+  function cleanMeshes(p) {
+    const keys = Object.keys(terrainMeshes);
+    if (keys.length < 300) return;
+    keys.sort(function(a, b) {
+      return terrainMeshes[a].timestamp - terrainMeshes[b].timestamp;
+    });
+    const key = keys[0];
+    if (performance.now() - terrainMeshes[key].timestamp > 5000) {
+      const m = terrainMeshes[key];
+      m.positions.destroy();
+      m.colors.destroy();
+      m.uvs.destroy();
+      m.normals.destroy();
+      delete terrainMeshes[key];
+    }
   }
 
   const canvas = document.getElementById('render-canvas');
@@ -259,8 +307,20 @@ async function main() {
     extensions: ['EXT_frag_depth'],
   });
 
-  let a = regl._gl.getExtension('EXT_frag_depth');
+  const underSphere = Sphere(5);//, {segments: 64});
+  underSphere.uvs = [];
+  for (const p of underSphere.positions) {
+    const px = getUV(p);
+    underSphere.uvs.push([px.x, px.y]);
+  }
+  // for (const uv of underSphere.uvs) {
+  //   uv[0] = (uv[0] + 0.25) % 1;
+  // }
+  underSphere.positions = regl.buffer(underSphere.positions);
+  underSphere.uvs = regl.buffer(underSphere.uvs);
+  underSphere.cells = regl.elements(underSphere.cells);
 
+  // let a = regl._gl.getExtension('EXT_frag_depth');
 
   const texture = regl.texture({
     data: texture_img,
@@ -269,20 +329,28 @@ async function main() {
     wrap: 'repeat',
   });
 
-  const render = regl({
+  const earthTexture = regl.texture({
+    data: color_img,
+    min: 'mipmap',
+    mag: 'linear',
+    wrap_s: 'repeat',
+    wrap_t: 'repeat',
+    // flipY: true,
+  })
+
+  const renderTerrain = regl({
     vert: `
       precision highp float;
-      attribute vec3 position, normal, color, bc;
+      attribute vec3 position, normal, color;
       attribute vec2 uv;
       uniform mat4 model, view, projection;
-      varying vec3 vBC, vColor, vNormal;
+      varying vec3 vColor, vNormal;
       varying vec2 vUV;
       varying float flogz;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
         float Fcoef = 2.0 / log2(100000000.0 + 1.0);
         gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
-        vBC = bc;
         vColor = color;
         vNormal = normal;//vec3(model * vec4(normal, 1));
         vUV = uv;
@@ -294,7 +362,7 @@ async function main() {
       precision highp float;
       uniform sampler2D texture;
       uniform vec3 light;
-      varying vec3 vBC, vColor, vNormal;
+      varying vec3 vColor, vNormal;
       varying vec2 vUV;
       varying float flogz;
 
@@ -316,7 +384,6 @@ async function main() {
       normal: regl.prop('normals'),
       uv: regl.prop('uvs'),
       color: regl.prop('colors'),
-      bc: regl.prop('bc'),
     },
     uniforms: {
       model: regl.prop('model'),
@@ -329,6 +396,54 @@ async function main() {
     count: regl.prop('count'),
     cull: {
       enable: true,
+      face: 'back',
+    },
+  });
+
+  const renderEarth = regl({
+    vert: `
+      precision highp float;
+      attribute vec3 position;
+      attribute vec2 uv;
+      uniform mat4 model, view, projection;
+      varying vec2 vUV;
+      varying float flogz;
+      void main() {
+        gl_Position = projection * view * model * vec4(position, 1);
+        vUV = uv;
+        float Fcoef = 2.0 / log2(100000000.0 + 1.0);
+        gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
+        flogz = 1.0 + gl_Position.w;
+      }
+    `,
+    frag: `
+      #extension GL_EXT_frag_depth : enable
+      precision highp float;
+      uniform sampler2D texture;
+      varying vec2 vUV;
+      varying float flogz;
+
+      void main() {
+        vec4 c = texture2D(texture, vUV);
+        gl_FragColor = vec4(2.0 * c.rgb, 1);
+        float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
+        gl_FragDepthEXT = log2(flogz) * Fcoef_half;
+      }
+    `,
+    attributes: {
+      position: regl.prop('positions'),
+      uv: regl.prop('uvs'),
+    },
+    uniforms: {
+      model: regl.prop('model'),
+      view: regl.prop('view'),
+      projection: regl.prop('projection'),
+      texture: earthTexture,
+    },
+    viewport: regl.prop('viewport'),
+    elements: regl.prop('cells'),
+    cull: {
+      enable: false,
       face: 'back',
     },
   });
@@ -386,8 +501,8 @@ async function main() {
         colors: regl.buffer(data.colors),
         uvs: regl.buffer(data.uvs),
         normals: regl.buffer(data.normals),
-        bc: regl.buffer(data.bc),
         count: data.count,
+        timestamp: performance.now(),
       }
     }
 
@@ -457,34 +572,77 @@ async function main() {
       depth: 1,
     });
 
-    const nodes = getAvailableNodes(cam.getPosition());
+    const meshes = fetchMeshes(cam.getPosition());
 
-    const meshes = [];
+    // for (let mesh of meshes.tempMeshes) {
+    //   const translation = vec3.sub([], mesh.offset, cam.getPosition());
+    //   const model = mat4.fromTranslation([], translation);
+    //   mat4.scale(model, model, [0.98, 0.98, 0.98]);
+    //   render({
+    //     model: model,
+    //     view: view,
+    //     projection: projection,
+    //     viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+    //     positions: mesh.positions,
+    //     normals: mesh.normals,
+    //     uvs: mesh.uvs,
+    //     colors: mesh.colors,
+    //     light: vec3.normalize([], cam.getPosition()),
+    //     count: mesh.count
+    //   });
+    // }
 
-    for (let node of nodes) {
-      meshes.push(getMesh(node.node, node.enode));
-    }
-
-    for (let mesh of meshes) {
-      if (mesh === null) continue;
-      const translation = vec3.sub([], mesh.offset, cam.getPosition());
+    (function() {
+      const translation = vec3.sub([], [0,0,0], cam.getPosition());
       const model = mat4.fromTranslation([], translation);
-      render({
+      mat4.scale(model, model, [earthRadius, earthRadius, earthRadius]);
+      renderEarth({
         model: model,
         view: view,
         projection: projection,
         viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-        positions: mesh.positions,
-        normals: mesh.normals,
-        uvs: mesh.uvs,
-        colors: mesh.colors,
-        bc: mesh.bc,
-        light: vec3.normalize([], cam.getPosition()),
-        count: mesh.count
+        positions: underSphere.positions,
+        uvs: underSphere.uvs,
+        cells: underSphere.cells,
       });
+    })();
+
+    // regl.clear({
+    //   depth: 1,
+    // });
+
+    if (altitude < 700000) {
+      for (let mesh of meshes.meshes) {
+        const translation = vec3.sub([], mesh.offset, cam.getPosition());
+        const model = mat4.fromTranslation([], translation);
+        renderTerrain({
+          model: model,
+          view: view,
+          projection: projection,
+          viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+          positions: mesh.positions,
+          normals: mesh.normals,
+          uvs: mesh.uvs,
+          colors: mesh.colors,
+          light: vec3.normalize([], cam.getPosition()),
+          count: mesh.count
+        });
+      }
     }
 
+    nodeCache.clean();
+    cleanMeshes();
+
     document.getElementById('alt').innerText = `Altitude: ${Math.round(altitude)} meters`;
+
+    const nodeStats = nodeCache.stats();
+    document.getElementById('inflight-nodes').innerText = `Nodes in flight: ${nodeStats.inflight}`;
+    document.getElementById('cached-nodes').innerText = `Nodes cached: ${nodeStats.cached}`;
+
+    const inflightMeshes = Object.keys(terrainMeshesInFlight).length;
+    document.getElementById('inflight-meshes').innerText = `Meshes in flight: ${inflightMeshes}`;
+    const cachedMeshes = Object.keys(terrainMeshes).length;
+    document.getElementById('cached-meshes').innerText = `Meshes cached: ${cachedMeshes}`;
 
     requestAnimationFrame(loop);
   }
@@ -517,4 +675,20 @@ function loadImage(src) {
 
 function clamp(n, min, max) {
   return Math.min(Math.max(n, min), max);
+}
+
+function getUV(p) {
+  const PI = Math.PI;
+  p = vec3.normalize([], p);
+  const y = p[0];
+  const z = p[1]
+  const x = p[2];
+  const theta = Math.acos(z);
+  const phi = Math.atan2(y,x);
+  const px = (phi + PI)/(2 * PI);
+  const py = theta / PI;
+  return {
+    x: clamp(px, 0, 1.0),
+    y: clamp(py, 0, 1.0),
+  };
 }
