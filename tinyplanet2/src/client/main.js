@@ -31,15 +31,16 @@ async function main() {
   const qs = QuadSphere(constants.earthRadius);
 
   function getRequiredNodes(p) {
+    p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
     const maxDepth = 8;
     const nodes = [];
     qs.traverse(function(node, depth) {
       const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
-        .map(a => vec3.distance(node.sphere.c, a))
+        .map(a => greatCircleDistance(node.sphere.c, a))
         .reduce((a, b) => Math.max(a, b));
-      const dist = vec3.distance(p, node.sphere.c);
+      const dist = greatCircleDistance(p, node.sphere.c);
       nodes.push(node);
-      if (dist > radius + 10000 || depth === maxDepth) {
+      if (dist > radius * 1.1 || depth === maxDepth) {
         return false;
       }
       return true;
@@ -411,20 +412,20 @@ async function main() {
 
     const meshes = fetchMeshes(cam.getPosition());
 
-    // (function() {
-    //   const translation = vec3.sub([], [0,0,0], cam.getPosition());
-    //   const model = mat4.fromTranslation([], translation);
-    //   mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
-    //   renderEarth({
-    //     model: model,
-    //     view: view,
-    //     projection: projection,
-    //     viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-    //     positions: underSphere.positions,
-    //     uvs: underSphere.uvs,
-    //     cells: underSphere.cells,
-    //   });
-    // })();
+    (function() {
+      const translation = vec3.sub([], [0,0,0], cam.getPosition());
+      const model = mat4.fromTranslation([], translation);
+      mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
+      renderEarth({
+        model: model,
+        view: view,
+        projection: projection,
+        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+        positions: underSphere.positions,
+        uvs: underSphere.uvs,
+        cells: underSphere.cells,
+      });
+    })();
 
     
     let lastDepth = -1;
@@ -514,4 +515,14 @@ function getUV(p) {
     x: clamp(px, 0, 1.0),
     y: clamp(py, 0, 1.0),
   };
+}
+
+
+function greatCircleDistance(p0, p1) {
+  p0 = vec3.normalize([], p0);
+  p1 = vec3.normalize([], p1);
+  const p0xp1 = vec3.cross([], p0, p1);
+  const mp0xp1 = vec3.length(p0xp1);
+  const p0dp1 = vec3.dot(p0, p1);
+  return Math.atan2(mp0xp1, p0dp1) * constants.earthRadius;
 }
