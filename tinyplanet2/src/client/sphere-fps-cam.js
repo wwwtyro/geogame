@@ -39,7 +39,7 @@ module.exports = function(position, forward) {
 
   function lookUp(delta) {
     phi += delta;
-    phi = Math.min(Math.max(-0.99 * pi/2, phi), 0.99 * pi/2);
+    phi = Math.min(Math.max(-0.999 * pi/2, phi), 0.999 * pi/2);
   }
 
   function moveForward(delta) {

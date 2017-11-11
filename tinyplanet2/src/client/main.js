@@ -2,7 +2,7 @@
 
 const REGL = require('regl');
 const glMatrix = require('gl-matrix');
-const Sphere = require('icosphere');
+const Sphere = require('./sphere');
 const QuadSphere = require('../common/quadsphere');
 const constants = require('../common/constants');
 const SphereFPSCam = require('./sphere-fps-cam');
@@ -57,7 +57,7 @@ async function main() {
         .reduce((a, b) => Math.max(a, b));
       const dist = greatCircleDistance(p, node.sphere.c);
       nodes.push(node);
-      if (dist > radius * 2 || depth === constants.maxDepth) {
+      if (dist > radius * 3 || depth === constants.maxDepth) {
         return false;
       }
       return true;
@@ -154,15 +154,9 @@ async function main() {
     extensions: ['EXT_frag_depth'],
   });
 
-  const underSphere = Sphere(5);
-  underSphere.uvs = [];
-  for (const p of underSphere.positions) {
-    const px = getUV(p);
-    underSphere.uvs.push([px.x, px.y]);
-  }
+  const underSphere = Sphere(64);
   underSphere.positions = regl.buffer(underSphere.positions);
   underSphere.uvs = regl.buffer(underSphere.uvs);
-  underSphere.cells = regl.elements(underSphere.cells);
 
   const texture = regl.texture({
     data: texture_img,
@@ -285,7 +279,7 @@ async function main() {
       texture: earthTexture,
     },
     viewport: regl.prop('viewport'),
-    elements: regl.prop('cells'),
+    count: regl.prop('count'),
     cull: {
       enable: true,
       face: 'back',
@@ -433,7 +427,7 @@ async function main() {
         viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
         positions: underSphere.positions,
         uvs: underSphere.uvs,
-        cells: underSphere.cells,
+        count: underSphere.count,
       });
     })();
 
