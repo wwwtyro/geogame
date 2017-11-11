@@ -50,7 +50,6 @@ async function main() {
 
   function getRequiredNodes(p) {
     p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
-    const maxDepth = 8;
     const nodes = [];
     qs.traverse(function(node, depth) {
       const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
@@ -58,12 +57,13 @@ async function main() {
         .reduce((a, b) => Math.max(a, b));
       const dist = greatCircleDistance(p, node.sphere.c);
       nodes.push(node);
-      if (dist > radius * 1.1 || depth === maxDepth) {
+      if (dist > radius * 2 || depth === constants.maxDepth) {
         return false;
       }
       return true;
     });
-    return nodes;
+    const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
+    return nodes.filter(n => n.id.length >= maxDepth - 0);
   }
 
   meshWorker.onmessage = function(e) {
