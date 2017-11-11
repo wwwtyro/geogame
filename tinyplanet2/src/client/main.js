@@ -3,7 +3,8 @@
 const REGL = require('regl');
 const glMatrix = require('gl-matrix');
 const Sphere = require('icosphere');
-const quadtree = require('./quadtree');
+const QuadSphere = require('../common/quadsphere');
+const constants = require('../common/constants');
 const SphereFPSCam = require('./sphere-fps-cam');
 const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
@@ -12,7 +13,6 @@ const meshWorker = new Worker('bundled-worker.js');
 
 const cache = require('./cache');
 
-const earthRadius = 6371000; // meters
 const vScale = 1.0;
 const MAX_DEPTH = 9;
 
@@ -28,161 +28,22 @@ async function main() {
   const texture_img = await loadImage('texture.png');
   const color_img = await loadImage('earthcolor.jpg');
 
-  const sphere = [
-    quadtree.node( // Positive X
-      [ 1, -1,  1],
-      [ 1, -1, -1],
-      [ 1,  1, -1],
-      [ 1,  1,  1],
-      'px-'
-    ),
-    quadtree.node( // Negative X
-      [-1, -1, -1],
-      [-1, -1,  1],
-      [-1,  1,  1],
-      [-1,  1, -1],
-      'nx-'
-    ),
-    quadtree.node( // Positive Y
-      [-1,  1,  1],
-      [ 1,  1,  1],
-      [ 1,  1, -1],
-      [-1,  1, -1],
-      'py-'
-    ),
-    quadtree.node( // Negative Y
-      [-1, -1, -1],
-      [ 1, -1, -1],
-      [ 1, -1,  1],
-      [-1, -1,  1],
-      'ny-'
-    ),
-    quadtree.node( // Positive Z
-      [-1, -1,  1],
-      [ 1, -1,  1],
-      [ 1,  1,  1],
-      [-1,  1,  1],
-      'pz-'
-    ),
-    quadtree.node( // Negative Z
-      [ 1, -1, -1],
-      [-1, -1, -1],
-      [-1,  1, -1],
-      [ 1,  1, -1],
-      'nz-'
-    )
-  ];
+  const qs = QuadSphere(constants.earthRadius);
 
-
-  function getTreeFace(p) {
-    const pn = vec3.normalize([], p);
-    const roots = [[0, [1,0,0]], [1, [-1,0,0]], [2, [0,1,0]], [3, [0,-1,0]], [4, [0,0,1]], [5, [0,0,-1]]];
-    let maxi=0, maxv=-Infinity;
-    for (let root of roots) {
-      const dot = vec3.dot(pn, root[1]);
-      if (dot > maxv) {
-        maxv = dot;
-        maxi = root[0];
-      }
-    }
-    return sphere[maxi];
-  }
-
-  function unprojectPoint(p, face) {
-    const pn = vec3.normalize([], p);
-    let index = 0, alpha = 0;
-    if (face.c[0] === 1) {index = 0; alpha = 1};
-    if (face.c[0] === -1) {index = 0; alpha = -1};
-    if (face.c[1] === 1) {index = 1; alpha = 1};
-    if (face.c[1] === -1) {index = 1; alpha = -1};
-    if (face.c[2] === 1) {index = 2; alpha = 1};
-    if (face.c[2] === -1) {index = 2; alpha = -1};
-    const dt = (alpha - p[index])/pn[index];
-    return vec3.add([], p, vec3.scale([], pn, dt));
-  }
-
-  function getTreeNode(p, depth) {
-    const root = getTreeFace(p);
-    const pu = unprojectPoint(p, root);
-    let rnode = null;
-    quadtree.traverse(root, function(node, d) {
-      const right = node.right;
-      const up = node.up;
-      const wpu = vec3.sub([], pu, node.w);
-      if (vec3.dot(wpu, right) < 0) return false;
-      const epu = vec3.sub([], pu, node.e);
-      if (vec3.dot(epu, right) > 0) return false;
-      const spu = vec3.sub([], pu, node.s);
-      if (vec3.dot(spu, up) < 0) return false;
-      const npu = vec3.sub([], pu, node.n);
-      if (vec3.dot(npu, up) > 0) return false;
-      if (d === depth) {
-        rnode = node;
+  function getRequiredNodes(p) {
+    const maxDepth = 8;
+    const nodes = [];
+    qs.traverse(function(node, depth) {
+      const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
+        .map(a => vec3.distance(node.sphere.c, a))
+        .reduce((a, b) => Math.max(a, b));
+      const dist = vec3.distance(p, node.sphere.c);
+      nodes.push(node);
+      if (dist > radius + 10000 || depth === maxDepth) {
         return false;
       }
       return true;
     });
-    return rnode;
-  }
-
-  function getElevation(p, depth) {
-    depth = MAX_DEPTH;
-    const root = getTreeFace(p);
-    const pu = unprojectPoint(p, root);
-    const node = getTreeNode(p, depth);
-    const enode = nodeCache.get(node.id);
-    if (!enode) return 0;
-    const res = enode.resolution;
-    const right = node.right;
-    const rightn = vec3.normalize([], node.right);
-    const up = node.up;
-    const upn = vec3.normalize([], node.up);
-    const sw = node.sw;
-    const swpu = vec3.sub([], pu, sw);
-    const compright = vec3.dot(swpu, rightn)/(vec3.length(right) * 2);
-    const compup = vec3.dot(swpu, upn)/(vec3.length(up) * 2);
-    const p0 = [Math.floor(compright * res), Math.floor(compup * res)];
-    const p1 = [p0[0] + 1, p0[1] + 0];
-    const p2 = [p0[0] + 1, p0[1] + 1];
-    const p3 = [p0[0] + 0, p0[1] + 1];
-    const v0 = enode.elevations[p0[0]][p0[1]];
-    const v1 = enode.elevations[p1[0]][p1[1]];
-    const v2 = enode.elevations[p2[0]][p2[1]];
-    const v3 = enode.elevations[p3[0]][p3[1]];
-    return vScale * Math.max(v0, Math.max(v1, Math.max(v2, v3)));
-    const fright = compright * res - p0[0];
-    const fup = compup * res - p0[1];
-    const vx0 = v0 + fright * (v1 - v0);
-    const vx1 = v3 + fright * (v2 - v3);
-    const vy = vx0 + fup * (vx1 - vx0);
-    return vScale * vy;
-  }
-
-  function getRequiredNodes(p) {
-    const nodes = [];
-    for (let root of sphere) {
-      quadtree.traverse(root, function(node, depth) {
-        const radius = Math.max(
-          vec3.distance(
-            vec3.scale([], vec3.normalize([], node.c), earthRadius),
-            vec3.scale([], vec3.normalize([], node.se), earthRadius)
-          ),
-          vec3.distance(
-            vec3.scale([], vec3.normalize([], node.c), earthRadius),
-            vec3.scale([], vec3.normalize([], node.sw), earthRadius)
-          )
-        );
-        const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
-        nodes.push(node);
-        if (dist > radius + 10000) {
-          return false;
-        }
-        if (depth === MAX_DEPTH) {
-          return false;
-        }
-        return true;
-      });
-    }
     return nodes;
   }
 
@@ -211,10 +72,9 @@ async function main() {
     }
     terrainMeshesInFlight[node.id] = true;
     meshWorker.postMessage({
-      node: node,
+      node: qs.serializableNode(node),
       enode: nodeData,
       vScale: vScale,
-      earthRadius: earthRadius,
     });
     return null;
   }
@@ -222,29 +82,12 @@ async function main() {
   function fetchMeshes(p) {
     const nodes = getRequiredNodes(p);
     nodes.sort(function(a, b) {
-      const ca = vec3.scale([], vec3.normalize([], a.c), earthRadius);
-      const cb = vec3.scale([], vec3.normalize([], b.c), earthRadius);
+      const ca = vec3.scale([], vec3.normalize([], a.c), constants.earthRadius);
+      const cb = vec3.scale([], vec3.normalize([], b.c), constants.earthRadius);
       const da = vec3.distance(p, ca);
       const db = vec3.distance(p, cb);
       return da - db;
     });
-    // for (let node of nodes) {
-    //   if (node.id.length <= 3) continue;
-    //   let parentid = node.id.slice(0, node.id.length - 1);
-    //   const siblings = ['a', 'b', 'c', 'd'];
-    //   let haveAll = true;
-    //   for (let sibling of siblings) {
-    //     const id = parentid + sibling;
-    //     if (!(id in terrainMeshes)) {
-    //       haveAll = false;
-    //       break;
-    //     }
-    //   }
-    //   if (haveAll) continue;
-    //   while(!(parentid in terrainMeshes) && parentid.length > 3) {
-    //     parentid = parentid.slice(0, parentid.length - 1);
-    //   }
-    // }
     const meshes = [];
     for (let node of nodes) {
       const mesh = getMesh(node);
@@ -532,7 +375,7 @@ async function main() {
       cam.moveRight(speed * altitude);
     }
 
-    let e = altitude + earthRadius + getElevation(cam.getPosition());
+    let e = altitude + constants.earthRadius;// + getElevation(cam.getPosition());
     let delta = e - vec3.length(cam.getPosition());
     cam.moveUp(delta * 0.1);
 
@@ -568,38 +411,20 @@ async function main() {
 
     const meshes = fetchMeshes(cam.getPosition());
 
-    // for (let mesh of meshes.tempMeshes) {
-    //   const translation = vec3.sub([], mesh.offset, cam.getPosition());
+    // (function() {
+    //   const translation = vec3.sub([], [0,0,0], cam.getPosition());
     //   const model = mat4.fromTranslation([], translation);
-    //   mat4.scale(model, model, [0.98, 0.98, 0.98]);
-    //   render({
+    //   mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
+    //   renderEarth({
     //     model: model,
     //     view: view,
     //     projection: projection,
     //     viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-    //     positions: mesh.positions,
-    //     normals: mesh.normals,
-    //     uvs: mesh.uvs,
-    //     colors: mesh.colors,
-    //     light: vec3.normalize([], cam.getPosition()),
-    //     count: mesh.count
+    //     positions: underSphere.positions,
+    //     uvs: underSphere.uvs,
+    //     cells: underSphere.cells,
     //   });
-    // }
-
-    (function() {
-      const translation = vec3.sub([], [0,0,0], cam.getPosition());
-      const model = mat4.fromTranslation([], translation);
-      mat4.scale(model, model, [earthRadius, earthRadius, earthRadius]);
-      renderEarth({
-        model: model,
-        view: view,
-        projection: projection,
-        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-        positions: underSphere.positions,
-        uvs: underSphere.uvs,
-        cells: underSphere.cells,
-      });
-    })();
+    // })();
 
     
     let lastDepth = -1;

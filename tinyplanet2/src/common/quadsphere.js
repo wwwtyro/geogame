@@ -99,9 +99,19 @@ module.exports = function (radius) {
     };
   }
   
+
+  function serializableNode(node) {
+    const n = {};
+    for (let key of Object.keys(node)) {
+      if (key === '_transformUnitCube') continue;
+      n[key] = node[key];
+    }
+    return n;
+  }
   
   return {
     traverse: traverse,
+    serializableNode: serializableNode,
   }
 
 }
