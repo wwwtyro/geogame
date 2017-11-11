@@ -1,0 +1,23 @@
+{
+  "name": "proto2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "budo -H 0.0.0.0 main.js:bundle.js --live",
+    "proxy": "node proxy.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mapbox/tilebelt": "^1.0.1",
+    "axios": "^0.17.0",
+    "budo": "^10.0.4",
+    "cors": "^2.8.4",
+    "express": "^4.16.2",
+    "express-http-proxy": "^1.0.7",
+    "gl-matrix": "^2.4.0",
+    "regl": "^1.3.0"
+  }
+}
