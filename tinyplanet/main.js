@@ -174,7 +174,7 @@ async function main() {
           )
         );
         const dist = vec3.distance(p, vec3.scale([], vec3.normalize([], node.c), earthRadius));
-        if (dist > radius * 1.3) {
+        if (dist > radius + 1000) {
           nodes.push(node);
           return false;
         }
