@@ -10,12 +10,12 @@ module.exports = function (radius) {
   }
 
   const faces = {
-    'px': createRootNode('px-', [ 1,  0,  0], p => [ 1,    p[1], -p[0]]),
-    'nx': createRootNode('nx-', [-1,  0,  0], p => [-1,    p[1],  p[0]]),
-    'py': createRootNode('py-', [ 0,  1,  0], p => [ p[0],    1, -p[1]]),
-    'ny': createRootNode('ny-', [ 0, -1,  0], p => [ p[0],   -1,  p[1]]),
-    'pz': createRootNode('pz-', [ 0,  0,  1], p => [ p[0], p[1],     1]),
-    'nz': createRootNode('nz-', [ 0,  0, -1], p => [-p[0], p[1],    -1]),
+    'px': createRootNode('px-', [ 1,  0,  0], p => [ 1,    p[1], -p[0]], p => [-p[2], p[1]]),
+    'nx': createRootNode('nx-', [-1,  0,  0], p => [-1,    p[1],  p[0]], p => [ p[2], p[1]]),
+    'py': createRootNode('py-', [ 0,  1,  0], p => [ p[0],    1, -p[1]], p => [ p[0],-p[2]]),
+    'ny': createRootNode('ny-', [ 0, -1,  0], p => [ p[0],   -1,  p[1]], p => [ p[0], p[2]]),
+    'pz': createRootNode('pz-', [ 0,  0,  1], p => [ p[0], p[1],     1], p => [ p[0], p[1]]),
+    'nz': createRootNode('nz-', [ 0,  0, -1], p => [-p[0], p[1],    -1], p => [-p[0], p[1]]),
   }
 
   function traverse(testFunc) {
@@ -27,12 +27,12 @@ module.exports = function (radius) {
     }
   }
 
-  function createRootNode(id, normal, transformUnitCube) {
-    return createNode([-1,-1], [+1,-1], [+1,+1], [-1,+1], id, normal, transformUnitCube);
+  function createRootNode(id, normal, transformUnitCube, transformFace) {
+    return createNode([-1,-1], [+1,-1], [+1,+1], [-1,+1], id, normal, transformUnitCube, transformFace);
   }
   
-  
-  function createNode(sw, se, ne, nw, id, normal, transformUnitCube) {
+
+  function createNode(sw, se, ne, nw, id, normal, transformUnitCube, transformFace) {
     // Create the node object.
     const node = {};
     // Copy out the corners.
@@ -75,6 +75,7 @@ module.exports = function (radius) {
     }
     // Copy out the transform functions.
     node._transformUnitCube = transformUnitCube;
+    node._transformFace = transformFace;
     // Done!
     return node;
   }
@@ -82,10 +83,10 @@ module.exports = function (radius) {
   
   function createChildNodes(n) {
     return [
-      createNode(n.sw, n.s, n.c, n.w, n.id + 'a', n.normal, n._transformUnitCube),
-      createNode(n.s, n.se, n.e, n.c, n.id + 'b', n.normal, n._transformUnitCube),
-      createNode(n.c, n.e, n.ne, n.n, n.id + 'c', n.normal, n._transformUnitCube),
-      createNode(n.w, n.c, n.n, n.nw, n.id + 'd', n.normal, n._transformUnitCube),
+      createNode(n.sw, n.s, n.c, n.w, n.id + 'a', n.normal, n._transformUnitCube, n._transformFace),
+      createNode(n.s, n.se, n.e, n.c, n.id + 'b', n.normal, n._transformUnitCube, n._transformFace),
+      createNode(n.c, n.e, n.ne, n.n, n.id + 'c', n.normal, n._transformUnitCube, n._transformFace),
+      createNode(n.w, n.c, n.n, n.nw, n.id + 'd', n.normal, n._transformUnitCube, n._transformFace),
     ]
   }
   
@@ -104,14 +105,62 @@ module.exports = function (radius) {
     const n = {};
     for (let key of Object.keys(node)) {
       if (key === '_transformUnitCube') continue;
+      if (key === '_transformFace') continue;
       n[key] = node[key];
     }
     return n;
   }
+
   
+  function pointToFace(p) {
+    p = vec3.normalize([], p);
+    let maxd = -Infinity, maxkey = null;
+    for (let key in faces) {
+      const d = vec3.dot(p, faces[key].normal);
+      if (d > maxd) {
+        maxkey = key;
+        maxd = d;
+      }
+    }
+    return faces[maxkey];
+  }
+
+  function pointToNodeFraction(p, targetDepth) {
+    p = vec3.normalize([], p);
+    const face = pointToFace(p);
+    let index = 0, alpha = 0;
+    if (face.cube.c[0] === 1) {index = 0; alpha = 1};
+    if (face.cube.c[0] === -1) {index = 0; alpha = -1};
+    if (face.cube.c[1] === 1) {index = 1; alpha = 1};
+    if (face.cube.c[1] === -1) {index = 1; alpha = -1};
+    if (face.cube.c[2] === 1) {index = 2; alpha = 1};
+    if (face.cube.c[2] === -1) {index = 2; alpha = -1};
+    const dt = alpha/p[index];
+    const pn = vec3.scale([], p, dt);
+    const pf = face._transformFace(pn);
+    let targetNode = null;
+    traverseNode(face, function(node, depth) {
+      if (pf[0] < node.sw[0] || pf[0] > node.se[0]) return false;
+      if (pf[1] < node.sw[1] || pf[1] > node.ne[1]) return false;
+      if (depth === targetDepth) {
+        targetNode = node;
+        return false;
+      }
+      return true;
+    });
+    return {
+      node: targetNode,
+      fraction: [
+        (pf[0] - targetNode.sw[0]) / (targetNode.se[0] - targetNode.sw[0]), 
+        (pf[1] - targetNode.sw[1]) / (targetNode.nw[1] - targetNode.sw[1])
+      ],
+    };
+  }
+
   return {
     traverse: traverse,
     serializableNode: serializableNode,
+    pointToNodeFraction: pointToNodeFraction,
   }
 
 }

@@ -19,16 +19,34 @@ const MAX_DEPTH = 9;
 main();
 
 async function main() {
-
+  
+  const texture_img = await loadImage('texture.png');
+  const color_img = await loadImage('earthcolor.jpg');
+  const qs = QuadSphere(constants.earthRadius);
+  const terrainMeshes = {};
+  const terrainMeshesInFlight = {};
+  const workerQueue = [];
+  const canvas = document.getElementById('render-canvas');
+  
   const nodeCache = cache(key => {
     var url = location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');
     return `http://159.203.97.31/complete/${key}`;
   });
 
-  const texture_img = await loadImage('texture.png');
-  const color_img = await loadImage('earthcolor.jpg');
 
-  const qs = QuadSphere(constants.earthRadius);
+  function elevation(p) {
+    const nf = qs.pointToNodeFraction(p, constants.maxDepth);
+    const enode = nodeCache.get(nf.node.id);
+    if (!enode) return 0.0;
+    let x0 = Math.floor(enode.resolution * nf.fraction[0]);
+    let y0 = Math.floor(enode.resolution * nf.fraction[1]);
+    let a = enode.elevations[x0 + 0][y0 + 0];
+    let b = enode.elevations[x0 + 1][y0 + 0];
+    let c = enode.elevations[x0 + 1][y0 + 1];
+    let d = enode.elevations[x0 + 0][y0 + 1];
+    return [a,b,c,d].reduce((i, j) => Math.max(i, j));
+  }
+
 
   function getRequiredNodes(p) {
     p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
@@ -47,10 +65,6 @@ async function main() {
     });
     return nodes;
   }
-
-  const terrainMeshes = {};
-  const terrainMeshesInFlight = {};
-  const workerQueue = [];
 
   meshWorker.onmessage = function(e) {
     workerQueue.push(e.data);
@@ -117,10 +131,6 @@ async function main() {
       delete terrainMeshes[key];
     }
   }
-
-  const canvas = document.getElementById('render-canvas');
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
 
   function handleMouseMove(e) {
     cam.lookUp(e.movementY * -0.001);
@@ -376,7 +386,7 @@ async function main() {
       cam.moveRight(speed * altitude);
     }
 
-    let e = altitude + constants.earthRadius;// + getElevation(cam.getPosition());
+    let e = altitude + constants.earthRadius + elevation(cam.getPosition());
     let delta = e - vec3.length(cam.getPosition());
     cam.moveUp(delta * 0.1);
 
