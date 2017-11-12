@@ -80,6 +80,33 @@ module.exports = function (radius) {
     return node;
   }
   
+
+  function nodeFromId(id) {
+    const idsplit = id.split('-');
+    const faceid = idsplit[0];
+    const nodeid = idsplit[1];
+    let node = faces[faceid];
+    for(const c of nodeid) {
+      node = createChildNode(node, c);
+    }
+    return node;
+  }
+
+
+  function createChildNode(n, id) {
+    if (id === 'a') {
+      return createNode(n.sw, n.s, n.c, n.w, n.id + 'a', n.normal, n._transformUnitCube, n._transformFace);
+    }
+    if (id === 'b') {
+      return createNode(n.s, n.se, n.e, n.c, n.id + 'b', n.normal, n._transformUnitCube, n._transformFace);
+    }
+    if (id === 'c') {
+      return createNode(n.c, n.e, n.ne, n.n, n.id + 'c', n.normal, n._transformUnitCube, n._transformFace);
+    }
+    if (id === 'd') {
+      return createNode(n.w, n.c, n.n, n.nw, n.id + 'd', n.normal, n._transformUnitCube, n._transformFace);
+    }
+  }
   
   function createChildNodes(n) {
     return [
@@ -161,7 +188,8 @@ module.exports = function (radius) {
     traverse: traverse,
     serializableNode: serializableNode,
     pointToNodeFraction: pointToNodeFraction,
-  }
+    nodeFromId: nodeFromId,
+  };
 
 }
 

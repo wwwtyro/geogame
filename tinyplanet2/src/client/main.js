@@ -19,10 +19,134 @@ const MAX_DEPTH = 9;
 main();
 
 async function main() {
+
+  window.res = await fetch('/bintest');
+  window.ab = await window.res.arrayBuffer();
+
+  return
+
+
+  const tilebelt = require('@mapbox/tilebelt');
+
+  const qs = QuadSphere(constants.earthRadius);
+
+  const p = [-4773693.901540027,3750099.5086902347,-1945974.1763553189];
+
+  const node = qs.pointToNodeFraction(p, 11).node;
+
+  const res = 256;
+  const neededTiles = {};
+  for (let i = 0; i < res; i++) {
+    for (let j = 0; j < res; j++) {
+      let q = node._transformUnitCube([node.sw[0] + node.size * i/res, node.sw[1] + node.size * j/res]);
+      q = vec3.normalize([], q);
+      const ll = pointToLonLat(q);
+      const tile = tilebelt.pointToTile(ll.lon, ll.lat, 13);
+      neededTiles[tile] = tile;
+    }
+  }
+
+  const gp = require('get-pixels');
+
+  function loadTile(tile) {
+    return new Promise(function(resolve, reject) {
+      gp(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile[2]}/${tile[0]}/${tile[1]}.png`, function(err, pixels) {
+        if (err) {
+          reject(err);
+        }
+        resolve(pixels);
+      });
+    });
+  }
+
+  const promises = {};
+  for (let key of Object.keys(neededTiles)) {
+    promises[key] = loadTile(neededTiles[key]);
+  }
+
+  const pixels = {};
+  for (let key of Object.keys(promises)) {
+    pixels[key] = await promises[key];
+  }
+
+  const values = [];
+  const rgbs = [];
+  for (let j = 0; j < res; j++) {
+    for (let i = 0; i < res; i++) {
+      let q = node._transformUnitCube([node.sw[0] + node.size * i/res, node.sw[1] + node.size * j/res]);
+      q = vec3.normalize([], q);
+      const ll = pointToLonLat(q);
+      const tile = tilebelt.pointToTileFraction(ll.lon, ll.lat, 13);
+      const tf = [tile[0] - Math.floor(tile[0]), tile[1] - Math.floor(tile[1])];
+      tf[0] = Math.floor(tf[0] * 256);
+      tf[1] = Math.floor(tf[1] * 256);
+      const key = tile.map(a => Math.floor(a));
+      const r = pixels[key].get(tf[0], tf[1], 0);
+      const g = pixels[key].get(tf[0], tf[1], 1);
+      const b = pixels[key].get(tf[0], tf[1], 2);
+      rgbs.push([r,g,b]);
+      const e = Math.max(0, (r * 256 + g + b / 256) - 32768);
+      values.push(e);
+    }
+  }
+
+  const can = document.createElement('canvas');
+  can.width = can.height = 256;
+  document.body.appendChild(can);
+  const ctx = can.getContext('2d');
+  for (let j = 0; j < res; j++) {
+    for (let i = 0; i < res; i++) {
+      const e = Math.floor(256 * values[j * res + i]);
+      const rgb = rgbs[j * res + i];
+      const r = rgb[0];
+      const g = rgb[1];
+      const b = rgb[2];
+      ctx.fillStyle = `rgba(${r},${g},${b},1)`;
+      ctx.fillRect(i, j, 1, 1);
+    }
+  }
+
+  console.log(neededTiles);
+  console.log(Object.keys(neededTiles).length);
+  return;
+
+  // //[w,s,e,n]
+  // const ll = [node.sphere.sw, node.sphere.se, node.sphere.ne, node.sphere.nw].map(function (p) {
+  //   return pointToLonLat(p);
+  // });
+
+  // const w = ll.map(a => a.lon).reduce((a, b) => Math.min(a, b));
+  // const s = ll.map(a => a.lat).reduce((a, b) => Math.min(a, b));
+  // const e = ll.map(a => a.lon).reduce((a, b) => Math.max(a, b));
+  // const n = ll.map(a => a.lat).reduce((a, b) => Math.max(a, b));
   
+  // const tile = tilebelt.bboxToTile([w,s,e,n]);
+
+  // console.log(tile);
+  // return;
+
+
+  // console.log(ll);
+  // return;
+
+  // console.log(nf);
+  // return;
+
+
+  console.log(qs.nodeFromId('px-a'));
+
+  return;
+
+
+  window.res = await fetch('/bintest');
+  window.ab = await res.arrayBuffer();
+
+  return
+
+
   const texture_img = await loadImage('texture.png');
   const color_img = await loadImage('earthcolor.jpg');
-  const qs = QuadSphere(constants.earthRadius);
+  // const qs = QuadSphere(constants.earthRadius);
   const terrainMeshes = {};
   const terrainMeshesInFlight = {};
   const workerQueue = [];
@@ -154,7 +278,7 @@ async function main() {
     extensions: ['EXT_frag_depth'],
   });
 
-  const underSphere = Sphere(64);
+  const underSphere = Sphere(128);
   underSphere.positions = regl.buffer(underSphere.positions);
   underSphere.uvs = regl.buffer(underSphere.uvs);
 
@@ -491,7 +615,6 @@ async function main() {
 }
 
 
-
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -501,24 +624,9 @@ function loadImage(src) {
   });
 }
 
+
 function clamp(n, min, max) {
   return Math.min(Math.max(n, min), max);
-}
-
-function getUV(p) {
-  const PI = Math.PI;
-  p = vec3.normalize([], p);
-  const y = p[0];
-  const z = p[1]
-  const x = p[2];
-  const theta = Math.acos(z);
-  const phi = Math.atan2(y,x);
-  const px = (phi + PI)/(2 * PI);
-  const py = theta / PI;
-  return {
-    x: clamp(px, 0, 1.0),
-    y: clamp(py, 0, 1.0),
-  };
 }
 
 
@@ -529,4 +637,19 @@ function greatCircleDistance(p0, p1) {
   const mp0xp1 = vec3.length(p0xp1);
   const p0dp1 = vec3.dot(p0, p1);
   return Math.atan2(mp0xp1, p0dp1) * constants.earthRadius;
+}
+
+function pointToLonLat(p) {
+  const pi = Math.PI;
+  const twopi = 2 * pi;
+  p = vec3.normalize([], p);
+  const y = p[0];
+  const z = p[1]
+  const x = p[2];
+  const theta = Math.acos(z);
+  const phi = Math.atan2(y,x);
+  return {
+    lon: 360 * (phi + pi)/twopi - 180,
+    lat: 90 - 180 * theta/pi
+  };
 }
