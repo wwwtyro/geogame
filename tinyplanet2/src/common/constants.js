@@ -2,5 +2,6 @@
 
 module.exports = {
   earthRadius: 6378137,
-  maxDepth: 11,
+  maxDepth: 13,
+  nodeResolution: 32,
 };

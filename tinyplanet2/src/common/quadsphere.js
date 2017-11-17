@@ -35,6 +35,9 @@ module.exports = function (radius) {
   function createNode(sw, se, ne, nw, id, normal, transformUnitCube, transformFace) {
     // Create the node object.
     const node = {};
+    // Store the depth.
+    node.depth = id.length - 3;
+    node.mapdepth = node.depth + 2;
     // Copy out the corners.
     node.sw = sw.slice();
     node.se = se.slice();

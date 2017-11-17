@@ -10,249 +10,153 @@ const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
 
 const meshWorker = new Worker('bundled-worker.js');
-
-const cache = require('./cache');
-
-const vScale = 1.0;
-const MAX_DEPTH = 9;
+let requiredNodes = [];
 
 main();
 
 async function main() {
 
-  window.res = await fetch('/bintest');
-  window.ab = await window.res.arrayBuffer();
-
-  return
-
-
-  const tilebelt = require('@mapbox/tilebelt');
-
-  const qs = QuadSphere(constants.earthRadius);
-
-  const p = [-4773693.901540027,3750099.5086902347,-1945974.1763553189];
-
-  const node = qs.pointToNodeFraction(p, 11).node;
-
-  const res = 256;
-  const neededTiles = {};
-  for (let i = 0; i < res; i++) {
-    for (let j = 0; j < res; j++) {
-      let q = node._transformUnitCube([node.sw[0] + node.size * i/res, node.sw[1] + node.size * j/res]);
-      q = vec3.normalize([], q);
-      const ll = pointToLonLat(q);
-      const tile = tilebelt.pointToTile(ll.lon, ll.lat, 13);
-      neededTiles[tile] = tile;
-    }
-  }
-
-  const gp = require('get-pixels');
-
-  function loadTile(tile) {
-    return new Promise(function(resolve, reject) {
-      gp(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile[2]}/${tile[0]}/${tile[1]}.png`, function(err, pixels) {
-        if (err) {
-          reject(err);
-        }
-        resolve(pixels);
-      });
-    });
-  }
-
-  const promises = {};
-  for (let key of Object.keys(neededTiles)) {
-    promises[key] = loadTile(neededTiles[key]);
-  }
-
-  const pixels = {};
-  for (let key of Object.keys(promises)) {
-    pixels[key] = await promises[key];
-  }
-
-  const values = [];
-  const rgbs = [];
-  for (let j = 0; j < res; j++) {
-    for (let i = 0; i < res; i++) {
-      let q = node._transformUnitCube([node.sw[0] + node.size * i/res, node.sw[1] + node.size * j/res]);
-      q = vec3.normalize([], q);
-      const ll = pointToLonLat(q);
-      const tile = tilebelt.pointToTileFraction(ll.lon, ll.lat, 13);
-      const tf = [tile[0] - Math.floor(tile[0]), tile[1] - Math.floor(tile[1])];
-      tf[0] = Math.floor(tf[0] * 256);
-      tf[1] = Math.floor(tf[1] * 256);
-      const key = tile.map(a => Math.floor(a));
-      const r = pixels[key].get(tf[0], tf[1], 0);
-      const g = pixels[key].get(tf[0], tf[1], 1);
-      const b = pixels[key].get(tf[0], tf[1], 2);
-      rgbs.push([r,g,b]);
-      const e = Math.max(0, (r * 256 + g + b / 256) - 32768);
-      values.push(e);
-    }
-  }
-
-  const can = document.createElement('canvas');
-  can.width = can.height = 256;
-  document.body.appendChild(can);
-  const ctx = can.getContext('2d');
-  for (let j = 0; j < res; j++) {
-    for (let i = 0; i < res; i++) {
-      const e = Math.floor(256 * values[j * res + i]);
-      const rgb = rgbs[j * res + i];
-      const r = rgb[0];
-      const g = rgb[1];
-      const b = rgb[2];
-      ctx.fillStyle = `rgba(${r},${g},${b},1)`;
-      ctx.fillRect(i, j, 1, 1);
-    }
-  }
-
-  console.log(neededTiles);
-  console.log(Object.keys(neededTiles).length);
-  return;
-
-  // //[w,s,e,n]
-  // const ll = [node.sphere.sw, node.sphere.se, node.sphere.ne, node.sphere.nw].map(function (p) {
-  //   return pointToLonLat(p);
-  // });
-
-  // const w = ll.map(a => a.lon).reduce((a, b) => Math.min(a, b));
-  // const s = ll.map(a => a.lat).reduce((a, b) => Math.min(a, b));
-  // const e = ll.map(a => a.lon).reduce((a, b) => Math.max(a, b));
-  // const n = ll.map(a => a.lat).reduce((a, b) => Math.max(a, b));
-  
-  // const tile = tilebelt.bboxToTile([w,s,e,n]);
-
-  // console.log(tile);
-  // return;
-
-
-  // console.log(ll);
-  // return;
-
-  // console.log(nf);
-  // return;
-
-
-  console.log(qs.nodeFromId('px-a'));
-
-  return;
-
-
-  window.res = await fetch('/bintest');
-  window.ab = await res.arrayBuffer();
-
-  return
-
-
   const texture_img = await loadImage('texture.png');
   const color_img = await loadImage('earthcolor.jpg');
-  // const qs = QuadSphere(constants.earthRadius);
-  const terrainMeshes = {};
-  const terrainMeshesInFlight = {};
-  const workerQueue = [];
+  const qs = QuadSphere(constants.earthRadius);
+  const meshes = {};
+  const meshesInFlight = {};
   const canvas = document.getElementById('render-canvas');
-  
-  const nodeCache = cache(key => {
-    var url = location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');
-    return `http://159.203.97.31/complete/${key}`;
+  const regl = REGL({
+    canvas: canvas,
+    extensions: ['EXT_frag_depth'],
   });
 
 
-  function elevation(p) {
-    const nf = qs.pointToNodeFraction(p, constants.maxDepth);
-    const enode = nodeCache.get(nf.node.id);
-    if (!enode) return 0.0;
-    let x0 = Math.floor(enode.resolution * nf.fraction[0]);
-    let y0 = Math.floor(enode.resolution * nf.fraction[1]);
-    let a = enode.elevations[x0 + 0][y0 + 0];
-    let b = enode.elevations[x0 + 1][y0 + 0];
-    let c = enode.elevations[x0 + 1][y0 + 1];
-    let d = enode.elevations[x0 + 0][y0 + 1];
-    return [a,b,c,d].reduce((i, j) => Math.max(i, j));
+  meshWorker.onmessage = function(e) {
+    const d = e.data;
+    delete meshesInFlight[d.id];
+    meshes[d.id] = {
+      node: qs.nodeFromId(d.id),
+      offset: d.offset,
+      count: d.count,
+      positions: regl.buffer(new Float32Array(d.positions)),
+      normals: regl.buffer(new Float32Array(d.normals)),
+      uvs: regl.buffer(new Float32Array(d.uvs)),
+      noiseuvs: regl.buffer(new Float32Array(d.noiseuvs)),
+      heightmap: new Float32Array(d.heightmap),
+      timestamp: performance.now(),
+    }
   }
 
+  function elevation(p) {
+    let nf, mesh = null, depth = constants.maxDepth;
+    while (!mesh ) {
+      nf = qs.pointToNodeFraction(p, depth);
+      mesh = meshes[nf.node.id];
+      depth -= 1;
+      if (depth === -1) return 0.0;
+    }
+    const heightmap = meshes[nf.node.id].heightmap;
+    let x0 = Math.floor(constants.nodeResolution * nf.fraction[0]);
+    let y0 = Math.floor(constants.nodeResolution * nf.fraction[1]);
+    const a = heightmap[constants.nodeResolution * (y0 + 0) + (x0 + 0)];
+    const b = heightmap[constants.nodeResolution * (y0 + 0) + (x0 + 1)];
+    const c = heightmap[constants.nodeResolution * (y0 + 1) + (x0 + 1)];
+    const d = heightmap[constants.nodeResolution * (y0 + 1) + (x0 + 0)];
+    let e = [a,b,c,d].reduce((i,j) => Math.max(i,j));
+    if (isNaN(e)) return a;
+    return e;
+  }
+
+  setInterval(function() {
+    requiredNodes = getRequiredNodes(cam.getPosition());
+    console.log(`Required nodes count: ${requiredNodes.length}`);
+  }, 1000);
 
   function getRequiredNodes(p) {
     p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
     const nodes = [];
     qs.traverse(function(node, depth) {
       const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
-        .map(a => greatCircleDistance(node.sphere.c, a))
+        .map(a => vec3.distance(node.sphere.c, a))
         .reduce((a, b) => Math.max(a, b));
-      const dist = greatCircleDistance(p, node.sphere.c);
-      nodes.push(node);
-      if (dist > radius * 3 || depth === constants.maxDepth) {
+      const dist = vec3.distance(p, node.sphere.c);
+      const angular_diameter = 2 * Math.asin(radius/dist);
+      if (dist < 0 || angular_diameter < Math.PI/2 || depth === constants.maxDepth) {
+        nodes.push(node);
         return false;
       }
       return true;
     });
     const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
-    return nodes.filter(n => n.id.length >= maxDepth - 0);
+    return nodes;
+    // return nodes.filter(n => n.id.length >= maxDepth - 0);
   }
 
-  meshWorker.onmessage = function(e) {
-    workerQueue.push(e.data);
-  }
+  // function getRequiredNodes(p) {
+  //   p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
+  //   const nodes = [];
+  //   qs.traverse(function(node, depth) {
+  //     const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
+  //       .map(a => greatCircleDistance(node.sphere.c, a))
+  //       .reduce((a, b) => Math.max(a, b));
+  //     const dist = greatCircleDistance(p, node.sphere.c);
+  //     nodes.push(node);
+  //     if (dist > radius * 1.5 || depth === constants.maxDepth) {
+  //       return false;
+  //     }
+  //     return true;
+  //   });
+  //   const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
+  //   return nodes;
+  //   // return nodes.filter(n => n.id.length >= maxDepth - 0);
+  // }
 
   function getMesh(node) {
-    if (node.id in terrainMeshes) {
-      terrainMeshes[node.id].timestamp = performance.now();
-      return terrainMeshes[node.id];
+    if (node.id in meshes) {
+      meshes[node.id].timestamp = performance.now();
+      return meshes[node.id];
     }
-    if (node.id in terrainMeshesInFlight) {
+    if (node.id in meshesInFlight) {
       return null;
     }
-    const nodeData = nodeCache.get(node.id);
-    if (!nodeData) {
+    if (Object.keys(meshesInFlight).length > 7) {
       return null;
     }
-    if (Object.keys(terrainMeshesInFlight).length > 1) {
-      return null;
-    }
-    terrainMeshesInFlight[node.id] = true;
-    meshWorker.postMessage({
-      node: qs.serializableNode(node),
-      enode: nodeData,
-      vScale: vScale,
-    });
+    meshesInFlight[node.id] = true;
+    meshWorker.postMessage({id: node.id});
     return null;
   }
 
   function fetchMeshes(p) {
-    const nodes = getRequiredNodes(p);
+    // const nodes = getRequiredNodes(p);
+    const nodes = requiredNodes.slice();
     nodes.sort(function(a, b) {
-      const ca = vec3.scale([], vec3.normalize([], a.c), constants.earthRadius);
-      const cb = vec3.scale([], vec3.normalize([], b.c), constants.earthRadius);
-      const da = vec3.distance(p, ca);
-      const db = vec3.distance(p, cb);
+      const ca = vec3.scale([], vec3.normalize([], a.cube.c), constants.earthRadius);
+      const cb = vec3.scale([], vec3.normalize([], b.cube.c), constants.earthRadius);
+      const da = greatCircleDistance(p, ca);
+      const db = greatCircleDistance(p, cb);
       return da - db;
     });
-    const meshes = [];
+    const fetched = [];
     for (let node of nodes) {
       const mesh = getMesh(node);
       if (mesh) {
-        meshes.push(mesh);
+        fetched.push(mesh);
       }
     }
-    return {
-      meshes: meshes,
-    }
+    return fetched;
   }
 
   function cleanMeshes(p) {
-    const keys = Object.keys(terrainMeshes);
-    if (keys.length < 300) return;
+    const keys = Object.keys(meshes);
+    if (keys.length < 512) return;
     keys.sort(function(a, b) {
-      return terrainMeshes[a].timestamp - terrainMeshes[b].timestamp;
+      return meshes[a].timestamp - meshes[b].timestamp;
     });
     const key = keys[0];
-    if (performance.now() - terrainMeshes[key].timestamp > 5000) {
-      const m = terrainMeshes[key];
+    if (performance.now() - meshes[key].timestamp > 5000) {
+      const m = meshes[key];
       m.positions.destroy();
-      m.colors.destroy();
-      m.uvs.destroy();
       m.normals.destroy();
-      delete terrainMeshes[key];
+      m.uvs.destroy();
+      delete meshes[key];
     }
   }
 
@@ -273,16 +177,11 @@ async function main() {
     canvas.requestPointerLock();
   });
 
-  const regl = REGL({
-    canvas: canvas,
-    extensions: ['EXT_frag_depth'],
-  });
-
   const underSphere = Sphere(128);
   underSphere.positions = regl.buffer(underSphere.positions);
   underSphere.uvs = regl.buffer(underSphere.uvs);
 
-  const texture = regl.texture({
+  const noiseTexture = regl.texture({
     data: texture_img,
     min: 'mipmap',
     mag: 'linear',
@@ -300,56 +199,52 @@ async function main() {
   const renderTerrain = regl({
     vert: `
       precision highp float;
-      attribute vec3 position, normal, color;
-      attribute vec2 uv;
+      attribute vec3 position, normal;
+      attribute vec2 uv, noiseuv;
       uniform mat4 model, view, projection;
+      uniform sampler2D earthTexture;
+      varying float vLogZ;
       varying vec3 vColor, vNormal;
-      varying vec2 vUV;
-      varying float flogz;
+      varying vec2 vNoiseUV;
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
         float Fcoef = 2.0 / log2(100000000.0 + 1.0);
         gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
-        vColor = color;
-        vNormal = normal;//vec3(model * vec4(normal, 1));
-        vUV = uv;
-        flogz = 1.0 + gl_Position.w;
+        vLogZ = 1.0 + gl_Position.w;
+        vColor = texture2D(earthTexture, uv).rgb;
+        vNormal = normal;
+        vNoiseUV = noiseuv;
       }
     `,
     frag: `
       #extension GL_EXT_frag_depth : enable
       precision highp float;
-      uniform sampler2D texture;
       uniform vec3 light;
+      uniform sampler2D noiseTexture;
+      varying float vLogZ;
       varying vec3 vColor, vNormal;
-      varying vec2 vUV;
-      varying float flogz;
-
-      vec3 saturate(vec3 c, float delta) {
-        float p = sqrt(c.r*c.r*0.299 + c.g*c.g*0.587 + c.b*c.b*0.114);
-        return p + delta * (c - p);
-      }
-
+      varying vec2 vNoiseUV;
       void main() {
-        float t = texture2D(texture, vUV).r;
-        float l = 2.0 * clamp(dot(normalize(vNormal), normalize(light)), 0.25, 1.0);
-        gl_FragColor = vec4(saturate(vColor * l * t * t, 1.0), 1.0);
+        float n = texture2D(noiseTexture, vNoiseUV).r;
+        float l = clamp(dot(vNormal, light), 0.25, 1.0);
+        gl_FragColor = vec4(2.0 * vColor * l * n, 1);
         float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
-        gl_FragDepthEXT = log2(flogz) * Fcoef_half;
+        gl_FragDepthEXT = log2(vLogZ) * Fcoef_half;
       }
     `,
     attributes: {
+      uv: regl.prop('uvs'),
+      noiseuv: regl.prop('noiseuvs'),
       position: regl.prop('positions'),
       normal: regl.prop('normals'),
-      uv: regl.prop('uvs'),
-      color: regl.prop('colors'),
     },
     uniforms: {
       model: regl.prop('model'),
       view: regl.prop('view'),
       projection: regl.prop('projection'),
       light: regl.prop('light'),
-      texture: texture,
+      earthTexture: earthTexture,
+      noiseTexture: noiseTexture,
     },
     viewport: regl.prop('viewport'),
     count: regl.prop('count'),
@@ -413,12 +308,16 @@ async function main() {
     }
   });
 
-  let altitude = 1000;
-  const camData = JSON.parse(localStorage.camData || `{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
-  let cam = SphereFPSCam(camData.position, camData.forward);
+  const camData = JSON.parse(localStorage.camData || `"{altitude":1000,"camDump":{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012],"opts":{"phi":0}}}`);
+  let altitude = camData.altitude || 1000;
+  // const camData = JSON.parse(`{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
+  let cam = SphereFPSCam(camData.camDump.position, camData.camDump.forward, camData.camDump.opts);
 
   setInterval(function() {
-    localStorage.setItem('camData', JSON.stringify(cam.dump()));
+    localStorage.setItem('camData', JSON.stringify({
+      camDump: cam.dump(),
+      altitude: altitude,
+    }));
   }, 1000);
 
   const keyboard = {
@@ -457,22 +356,6 @@ async function main() {
 
   function loop() {
 
-    const data = workerQueue.pop();
-    if (data) {
-      delete terrainMeshesInFlight[data.node.id];
-      terrainMeshes[data.node.id] = {
-        node: data.node,
-        offset: data.offset,
-        positions: regl.buffer(data.positions),
-        colors: regl.buffer(data.colors),
-        uvs: regl.buffer(data.uvs),
-        normals: regl.buffer(data.normals),
-        count: data.count,
-        timestamp: performance.now(),
-      }
-    }
-
-
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
 
@@ -504,7 +387,8 @@ async function main() {
       cam.moveRight(speed * altitude);
     }
 
-    let e = altitude + constants.earthRadius + elevation(cam.getPosition());
+    const ele = elevation(cam.getPosition());
+    let e = altitude + constants.earthRadius + ele;
     let delta = e - vec3.length(cam.getPosition());
     cam.moveUp(delta * 0.1);
 
@@ -526,7 +410,7 @@ async function main() {
       const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
       const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
       mapCtx.fillStyle='#FF0000';
-      mapCtx.fillRect(i-4,j-4,9,9);
+      mapCtx.fillRect(i-1,j-1,3,3);
     })();
 
 
@@ -538,8 +422,7 @@ async function main() {
       depth: 1,
     });
 
-    const meshes = fetchMeshes(cam.getPosition());
-
+    
     (function() {
       const translation = vec3.sub([], [0,0,0], cam.getPosition());
       const model = mat4.fromTranslation([], translation);
@@ -554,47 +437,39 @@ async function main() {
         count: underSphere.count,
       });
     })();
-
     
-    let lastDepth = -1;
-    if (altitude < 700000) {
-      meshes.meshes.sort((a,b)=>a.node.id.length - b.node.id.length);
-      for (let mesh of meshes.meshes) {
-        const depth = mesh.node.id.length;
-        if (depth !== lastDepth) {
-          regl.clear({ depth: 1, });
-          lastDepth = depth;
-        }
+    regl.clear({ depth: 1 });
+    
+    const fetchedMeshes = fetchMeshes(cam.getPosition());
+    
+    if (altitude < 700000 || true) {
+      fetchedMeshes.sort( (a, b) => a.node.id.length - b.node.id.length);
+      for (let mesh of fetchedMeshes) {
         const translation = vec3.sub([], mesh.offset, cam.getPosition());
         const model = mat4.fromTranslation([], translation);
         renderTerrain({
           model: model,
           view: view,
           projection: projection,
+          light: vec3.normalize([], cam.getPosition()),
           viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
           positions: mesh.positions,
           normals: mesh.normals,
           uvs: mesh.uvs,
-          colors: mesh.colors,
-          light: vec3.normalize([], cam.getPosition()),
-          count: mesh.count
+          noiseuvs: mesh.noiseuvs,
+          count: mesh.count,
         });
       }
-    }
+  }
 
-    nodeCache.clean();
     cleanMeshes();
 
     document.getElementById('alt').innerText = `Altitude: ${Math.round(altitude)} meters`;
 
-    const nodeStats = nodeCache.stats();
-    document.getElementById('inflight-nodes').innerText = `Nodes in flight: ${nodeStats.inflight}`;
-    document.getElementById('cached-nodes').innerText = `Nodes cached: ${nodeStats.cached}`;
-
-    const inflightMeshes = Object.keys(terrainMeshesInFlight).length;
-    document.getElementById('inflight-meshes').innerText = `Meshes in flight: ${inflightMeshes}`;
-    const cachedMeshes = Object.keys(terrainMeshes).length;
-    document.getElementById('cached-meshes').innerText = `Meshes cached: ${cachedMeshes}`;
+    const inflightMeshes = Object.keys(meshesInFlight).length;
+    document.getElementById('inflight-meshes').innerText = `Heightmaps in flight: ${inflightMeshes}`;
+    const cachedMeshes = Object.keys(meshes).length;
+    document.getElementById('cached-meshes').innerText = `Heightmaps cached: ${cachedMeshes}`;
 
     requestAnimationFrame(loop);
   }
@@ -652,4 +527,9 @@ function pointToLonLat(p) {
     lon: 360 * (phi + pi)/twopi - 180,
     lat: 90 - 180 * theta/pi
   };
+}
+
+function localurl(endpoint) {
+  const url = location.protocol+'//'+location.hostname+(location.port ? ':'+location.port: '');
+  return url + endpoint;
 }

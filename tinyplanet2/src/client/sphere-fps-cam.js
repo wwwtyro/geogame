@@ -3,7 +3,9 @@
 const mat4 = require('gl-matrix').mat4;
 const vec3 = require('gl-matrix').vec3;
 
-module.exports = function(position, forward) {
+module.exports = function(position, forward, opts) {
+
+  opts = opts || {};
 
   const pi = Math.PI;
 
@@ -13,7 +15,7 @@ module.exports = function(position, forward) {
   let right = [];
   let up = [];
 
-  let phi = 0;
+  let phi = opts.phi === undefined ? 0 : opts.phi;
 
   normalize();
 
@@ -21,14 +23,15 @@ module.exports = function(position, forward) {
     return {
       position: position.slice(),
       forward: forward.slice(),
+      opts: {phi: phi},
     };
   }
 
   function normalize() {
     up = vec3.normalize([], position);
     forward = vec3.normalize(forward, forward);
-    vec3.cross(right, forward, up);
-    vec3.cross(forward, up, right);
+    vec3.normalize(right, vec3.cross(right, forward, up));
+    vec3.normalize(forward, vec3.cross(forward, up, right));
   }
 
   function lookRight(delta) {
