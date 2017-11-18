@@ -86,27 +86,8 @@ async function main() {
     });
     const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
     return nodes;
-    // return nodes.filter(n => n.id.length >= maxDepth - 0);
   }
 
-  // function getRequiredNodes(p) {
-  //   p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
-  //   const nodes = [];
-  //   qs.traverse(function(node, depth) {
-  //     const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
-  //       .map(a => greatCircleDistance(node.sphere.c, a))
-  //       .reduce((a, b) => Math.max(a, b));
-  //     const dist = greatCircleDistance(p, node.sphere.c);
-  //     nodes.push(node);
-  //     if (dist > radius * 1.5 || depth === constants.maxDepth) {
-  //       return false;
-  //     }
-  //     return true;
-  //   });
-  //   const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
-  //   return nodes;
-  //   // return nodes.filter(n => n.id.length >= maxDepth - 0);
-  // }
 
   function getMesh(node) {
     if (node.id in meshes) {
@@ -125,7 +106,6 @@ async function main() {
   }
 
   function fetchMeshes(p) {
-    // const nodes = getRequiredNodes(p);
     const nodes = requiredNodes.slice();
     nodes.sort(function(a, b) {
       const ca = vec3.scale([], vec3.normalize([], a.cube.c), constants.earthRadius);
@@ -156,6 +136,7 @@ async function main() {
       m.positions.destroy();
       m.normals.destroy();
       m.uvs.destroy();
+      m.noiseuvs.destroy();
       delete meshes[key];
     }
   }
@@ -184,7 +165,6 @@ async function main() {
   const noiseTexture = regl.texture({
     data: texture_img,
     min: 'mipmap',
-    mag: 'linear',
     wrap: 'repeat',
   });
 
@@ -227,7 +207,7 @@ async function main() {
       void main() {
         float n = texture2D(noiseTexture, vNoiseUV).r;
         float l = clamp(dot(vNormal, light), 0.25, 1.0);
-        gl_FragColor = vec4(2.0 * vColor * l * n, 1);
+        gl_FragColor = vec4(clamp(2.0 * vColor * l, 0.0, 1.0) * n, 1);
         float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
         gl_FragDepthEXT = log2(vLogZ) * Fcoef_half;
       }
@@ -351,9 +331,6 @@ async function main() {
   });
 
 
-  const mapCanvas = document.getElementById('map');
-  const mapCtx = mapCanvas.getContext('2d');
-
   function loop() {
 
     canvas.width = canvas.clientWidth;
@@ -392,27 +369,6 @@ async function main() {
     let delta = e - vec3.length(cam.getPosition());
     cam.moveUp(delta * 0.1);
 
-    mapCanvas.width = window.innerWidth/4;
-    mapCanvas.height = mapCanvas.width/2;
-    mapCtx.drawImage(color_img, 0, 0, mapCanvas.width, mapCanvas.height);
-
-    (function() {
-      const pi = Math.PI;
-      const twopi = 2 * pi;
-      const w = mapCanvas.width;
-      const h = mapCanvas.height;
-      const p = vec3.normalize([], cam.getPosition());
-      const y = p[0];
-      const z = p[1]
-      const x = p[2];
-      const theta = Math.acos(z);
-      const phi = Math.atan2(y,x);
-      const i = clamp(Math.floor(w * (phi + pi)/twopi), 0, w - 1);
-      const j = clamp(Math.floor(h * theta/pi), 0, h - 1);
-      mapCtx.fillStyle='#FF0000';
-      mapCtx.fillRect(i-1,j-1,3,3);
-    })();
-
 
     const view = cam.getView(true);
     const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, -1, 1);
@@ -438,8 +394,6 @@ async function main() {
       });
     })();
     
-    regl.clear({ depth: 1 });
-    
     const fetchedMeshes = fetchMeshes(cam.getPosition());
     
     if (altitude < 700000 || true) {
@@ -460,7 +414,7 @@ async function main() {
           count: mesh.count,
         });
       }
-  }
+    }
 
     cleanMeshes();
 
@@ -486,6 +440,17 @@ async function main() {
     cam = SphereFPSCam(tmpData.position, tmpData.forward);
     altitude = 1000;
   });
+  document.getElementById('btn-half-dome').addEventListener('click', function() {
+    const tmpData = JSON.parse(`{"position":[-4388737.000459448,3905540.419065803,-2489080.671623663],"forward":[-0.44682654443610614,0.06647549952156721,0.8921474357698098]}`);
+    cam = SphereFPSCam(tmpData.position, tmpData.forward);
+    altitude = 1000;
+  });
+  document.getElementById('btn-mount-everest').addEventListener('click', function() {
+    const tmpData = JSON.parse(`{"position":[5630365.069495591,2997598.23949465,309110.51145426015],"forward":[0.10653175629126255,-0.09806507735329073,-0.9894615836429387]}`);
+    cam = SphereFPSCam(tmpData.position, tmpData.forward);
+    altitude = 1000;
+  });
+ 
 
 }
 

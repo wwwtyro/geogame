@@ -33,6 +33,7 @@ onmessage = function(e) {
 
 
 function buildMesh(id, hmap) {
+  if (id === "px-") console.log(hmap.length);
 
   const t0 = performance.now();
 
@@ -50,21 +51,56 @@ function buildMesh(id, hmap) {
   const nw = node.cube.nw;
   const right = vec3.scale([], vec3.sub([], se, sw), 1 / (res - 1));
   const up = vec3.scale([], vec3.sub([], nw, sw), 1 / (res - 1));
-
+  const nup = vec3.normalize([], node.cube.c);
+  const skirt = vec3.length(vec3.sub([], node.sphere.sw, node.sphere.se)) * 0.1;
+  
   const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
 
-  for (let i = 0; i < res - 1; i++) {
-    for (let j = 0; j < res - 1; j++) {
+  for (let i = -1; i <= res - 1; i++) {
+    for (let j = -1; j <= res - 1; j++) {
 
-      const a = vec3.add([], vec3.add([], sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 0));
-      const b = vec3.add([], vec3.add([], sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 0));
-      const c = vec3.add([], vec3.add([], sw, vec3.scale([], right, i + 1)), vec3.scale([], up, j + 1));
-      const d = vec3.add([], vec3.add([], sw, vec3.scale([], right, i + 0)), vec3.scale([], up, j + 1));
+      // Cut corners.
+      if (i === -1 || i === res - 1) {
+        if (j === -1 || j === res - 1) continue;
+      }
+
+      let x0 = i, x1 = i + 1;
+      let y0 = j, y1 = j + 1;
+      let sa = 0;
+      let sb = 0;
+      let sc = 0;
+      let sd = 0;
       
-      const ea = hmap[(j + 0) * res + (i + 0)];
-      const eb = hmap[(j + 0) * res + (i + 1)];
-      const ec = hmap[(j + 1) * res + (i + 1)];
-      const ed = hmap[(j + 1) * res + (i + 0)];
+      if (i === -1) {
+        x0 = 0;
+        sa = -skirt;
+        sd = -skirt;
+      }
+      if (i === res - 1) {
+        x1 = res - 1;
+        sb = -skirt;
+        sc = -skirt;
+      }
+      if (j === -1) {
+        y0 = 0;
+        sa = -skirt;
+        sb = -skirt;
+      }
+      if (j === res - 1) {
+        y1 = res - 1;
+        sc = -skirt;
+        sd = -skirt;
+      }
+
+      const a = vec3.add([], vec3.add([], sw, vec3.scale([], right, x0)), vec3.scale([], up, y0));
+      const b = vec3.add([], vec3.add([], sw, vec3.scale([], right, x1)), vec3.scale([], up, y0));
+      const c = vec3.add([], vec3.add([], sw, vec3.scale([], right, x1)), vec3.scale([], up, y1));
+      const d = vec3.add([], vec3.add([], sw, vec3.scale([], right, x0)), vec3.scale([], up, y1));
+
+      const ea = sa + hmap[y0 * res + x0];
+      const eb = sb + hmap[y0 * res + x1];
+      const ec = sc + hmap[y1 * res + x1];
+      const ed = sd + hmap[y1 * res + x0];
 
       const ma = vec3.scale([], vec3.normalize([], a), rad + ea);
       const mb = vec3.scale([], vec3.normalize([], b), rad + eb);
@@ -90,8 +126,12 @@ function buildMesh(id, hmap) {
       const ab = vec3.normalize([], vec3.sub([], mb, ma));
       const ac = vec3.normalize([], vec3.sub([], mc, ma));
       const ad = vec3.normalize([], vec3.sub([], md, ma));
-      const n0 = vec3.normalize([], vec3.cross([], ab, ac));
-      const n1 = vec3.normalize([], vec3.cross([], ac, ad));
+      let n0 = vec3.normalize([], vec3.cross([], ab, ac));
+      let n1 = vec3.normalize([], vec3.cross([], ac, ad));
+      if (i === -1 || j === -1 || i === res - 1 || j === res - 1) {
+        n0 = nup;
+        n1 = nup;
+      }
       normals.push(n0[0]); normals.push(n0[1]); normals.push(n0[2]);
       normals.push(n0[0]); normals.push(n0[1]); normals.push(n0[2]);
       normals.push(n0[0]); normals.push(n0[1]); normals.push(n0[2]);
@@ -109,33 +149,33 @@ function buildMesh(id, hmap) {
       uvs.push(uv.x); uvs.push(uv.y);
       uvs.push(uv.x); uvs.push(uv.y);
 
-      noiseuvs.push((i + 0)/res); noiseuvs.push((j + 0)/res);
-      noiseuvs.push((i + 1)/res); noiseuvs.push((j + 0)/res);
-      noiseuvs.push((i + 1)/res); noiseuvs.push((j + 1)/res);
-      noiseuvs.push((i + 0)/res); noiseuvs.push((j + 0)/res);
-      noiseuvs.push((i + 1)/res); noiseuvs.push((j + 1)/res);
-      noiseuvs.push((i + 0)/res); noiseuvs.push((j + 1)/res);
+      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
+      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
+      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
+      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
+      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
+      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
       
     }
   }
 
-    bounds.center = vec3.add([], bounds.min, vec3.scale([], vec3.sub([], bounds.max, bounds.min), 0.5));
-    for (let i = 0; i < positions.length / 3; i++) {
-      positions[i * 3 + 0] -= bounds.center[0];
-      positions[i * 3 + 1] -= bounds.center[1];
-      positions[i * 3 + 2] -= bounds.center[2];
-    }
+  bounds.center = vec3.add([], bounds.min, vec3.scale([], vec3.sub([], bounds.max, bounds.min), 0.5));
+  for (let i = 0; i < positions.length / 3; i++) {
+    positions[i * 3 + 0] -= bounds.center[0];
+    positions[i * 3 + 1] -= bounds.center[1];
+    positions[i * 3 + 2] -= bounds.center[2];
+  }
 
-    console.log(`Mesh Worker: built mesh in ${performance.now() - t0} ms.`);
+  console.log(`Mesh Worker: built mesh in ${performance.now() - t0} ms.`);
 
-    return {
-      offset: bounds.center,
-      positions: new Float32Array(positions),
-      normals: new Float32Array(normals),
-      uvs: new Float32Array(uvs),
-      noiseuvs: new Float32Array(noiseuvs),
-      count: positions.length/3
-    }
+  return {
+    offset: bounds.center,
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    uvs: new Float32Array(uvs),
+    noiseuvs: new Float32Array(noiseuvs),
+    count: positions.length/3
+  }
 
 }
 
