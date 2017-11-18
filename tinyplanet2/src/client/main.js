@@ -288,7 +288,7 @@ async function main() {
     }
   });
 
-  const camData = JSON.parse(localStorage.camData || `"{altitude":1000,"camDump":{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012],"opts":{"phi":0}}}`);
+  const camData = JSON.parse(localStorage.camData || `{"altitude":1000,"camDump":{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012],"opts":{"phi":0}}}`);
   let altitude = camData.altitude || 1000;
   // const camData = JSON.parse(`{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
   let cam = SphereFPSCam(camData.camDump.position, camData.camDump.forward, camData.camDump.opts);
