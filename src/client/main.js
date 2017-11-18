@@ -6,6 +6,7 @@ const Sphere = require('./sphere');
 const QuadSphere = require('../common/quadsphere');
 const constants = require('../common/constants');
 const SphereFPSCam = require('./sphere-fps-cam');
+const rti = require('ray-triangle-intersection');
 const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
 
@@ -53,15 +54,20 @@ async function main() {
       if (depth === -1) return 0.0;
     }
     const heightmap = meshes[nf.node.id].heightmap;
-    let x0 = Math.floor(constants.nodeResolution * nf.fraction[0]);
-    let y0 = Math.floor(constants.nodeResolution * nf.fraction[1]);
+    let x0 = Math.floor((constants.nodeResolution - 1) * nf.fraction[0]);
+    let y0 = Math.floor((constants.nodeResolution - 1) * nf.fraction[1]);
     const a = heightmap[constants.nodeResolution * (y0 + 0) + (x0 + 0)];
     const b = heightmap[constants.nodeResolution * (y0 + 0) + (x0 + 1)];
     const c = heightmap[constants.nodeResolution * (y0 + 1) + (x0 + 1)];
     const d = heightmap[constants.nodeResolution * (y0 + 1) + (x0 + 0)];
-    let e = [a,b,c,d].reduce((i,j) => Math.max(i,j));
-    if (isNaN(e)) return a;
-    return e;
+    const va = [x0 + 0, y0 + 0, a];
+    const vb = [x0 + 1, y0 + 0, b];
+    const vc = [x0 + 1, y0 + 1, c];
+    const vd = [x0 + 0, y0 + 1, d];
+    const pf = [nf.fraction[0] * (constants.nodeResolution - 1), nf.fraction[1] * (constants.nodeResolution - 1), 10000];
+    let pt = rti([], pf, [0,0,-1], [va,vb,vc]);
+    pt = pt || rti([], pf, [0,0,-1], [va,vc,vd]);
+    return pt[2];
   }
 
   setInterval(function() {
@@ -189,7 +195,7 @@ async function main() {
       void main() {
         gl_Position = projection * view * model * vec4(position, 1);
         float Fcoef = 2.0 / log2(100000000.0 + 1.0);
-        gl_Position.z = log2(max(1e-6, 1.0 + gl_Position.w)) * Fcoef - 1.0;
+        gl_Position.z = log2(max(1000.0, 1.0 + gl_Position.w)) * Fcoef - 1.0;
         vLogZ = 1.0 + gl_Position.w;
         vColor = texture2D(earthTexture, uv).rgb;
         vNormal = normal;
@@ -367,7 +373,7 @@ async function main() {
     const ele = elevation(cam.getPosition());
     let e = altitude + constants.earthRadius + ele;
     let delta = e - vec3.length(cam.getPosition());
-    cam.moveUp(delta * 0.1);
+    cam.moveUp(delta * 1.0);
 
 
     const view = cam.getView(true);
