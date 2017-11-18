@@ -1,0 +1,27 @@
+{
+  "name": "underspark",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "DEBUG=1 nodemon -e js,html --exec bash --ignore static/bundle.js --ignore static/bundled-worker.js run.sh"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mapbox/tilebelt": "^1.0.1",
+    "better-sqlite3": "^4.0.3",
+    "express": "^4.16.1",
+    "get-pixels": "^3.3.0",
+    "gl-matrix": "^2.4.0",
+    "http": "0.0.0",
+    "icosphere": "^1.0.0",
+    "nodemon": "^1.12.1",
+    "regl": "^1.3.0",
+    "tilebelt": "^1.0.1",
+    "ws": "^3.2.0"
+  },
+  "description": "",
+  "devDependencies": {
+    "reload": "^2.2.2"
+  }
+}

@@ -1,0 +1,54 @@
+
+<html>
+
+  <head>
+    <script src='bundle.js' defer></script>
+    <script src='/reload/reload.js'></script>
+  </head>
+
+  <style>
+    body {
+      margin: 0px;
+    }
+
+    #render-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    #info {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      padding: 8px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+    }
+
+    .location {
+      color: white;
+      text-decoration: underline;
+      margin-top: 8px;
+      cursor: pointer;
+    }
+
+  </style>
+
+  <body>
+
+    <canvas id='render-canvas'></canvas>
+    <div id='info'>
+      <div id='alt'></div>
+      <div id='cached-nodes'></div>
+      <div id='inflight-nodes'></div>
+      <div id='cached-meshes'></div>
+      <div id='inflight-meshes'></div>
+      <div class='location' id='btn-grand-canyon'>Grand Canyon</div>
+      <div class='location' id='btn-mount-fuji'>Mount Fuji</div>
+      <div class='location' id='btn-half-dome'>Half Dome</div>
+      <div class='location' id='btn-mount-everest'>Mount Everest</div>
+    </div>
+
+  </body>
+
+</html>
