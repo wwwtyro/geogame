@@ -60,7 +60,7 @@ wss.on('connection', function connection(ws, req) {
         id: ws.__id,
       }));
     }
-});
+  });
   ws.on('message', function(data) {
     data = JSON.parse(data);
     if (data.type === 'location') {

@@ -14,7 +14,7 @@ const SphereFPSCam = require('./sphere-fps-cam');
 
 const meshWorker = new Worker('bundled-worker.js');
 let requiredNodes = [];
-
+let cam;
 
 main();
 
@@ -22,6 +22,7 @@ async function main() {
   const ws = new WebSocket(`ws://${location.hostname + (location.port ? ':'+location.port : '')}`);
   ws.onopen = function() {
     setInterval(function() {
+      if (cam === undefined) return;
       ws.send(JSON.stringify({
         type: 'location', 
         position: cam.position,
@@ -152,7 +153,7 @@ async function main() {
   setInterval(function() {
     if (cam.position.some(a => isNaN(a))) throw "Cam NaN";
     requiredNodes = getRequiredNodes(cam.position);
-    console.log(`Required nodes count: ${requiredNodes.length}`);
+    // console.log(`Required nodes count: ${requiredNodes.length}`);
   }, 1000);
 
   function getRequiredNodes(p) {
@@ -387,20 +388,14 @@ async function main() {
     }
   });
 
-  const camData = JSON.parse(localStorage.camData || {});
-  let cam = {
+  const camData = JSON.parse(localStorage.camData || "{}");
+  cam = {
     position: camData.position || [-4772871.832154342,3759742.5922662276,-1945180.8136176735],
     theta: camData.theta || -9.487000000000005,
     phi: camData.phi || -0.07499999999999693,
     acceleration: [0,0,0],
     velocity: [0,0,0],
     previouslyAirborne: false,
-  };
-
-  let origin = {
-    position: cam.position,
-    theta: cam.theta,
-    phi: cam.phi,
   };
 
   setInterval(function() {

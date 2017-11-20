@@ -33,8 +33,6 @@ onmessage = function(e) {
 
 
 function buildMesh(id, hmap) {
-  if (id === "px-") console.log(hmap.length);
-
   const t0 = performance.now();
 
   const node = qs.nodeFromId(id);
@@ -51,7 +49,7 @@ function buildMesh(id, hmap) {
   const nw = node.cube.nw;
   const right = vec3.scale([], vec3.sub([], se, sw), 1 / (res - 1));
   const up = vec3.scale([], vec3.sub([], nw, sw), 1 / (res - 1));
-  const nup = vec3.normalize([], node.cube.c);
+  const nup = vec3.scale([], vec3.normalize([], node.cube.c), 0.5);
   const skirt = vec3.length(vec3.sub([], node.sphere.sw, node.sphere.se)) * 0.1;
   
   const bounds = {min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity]};
@@ -166,7 +164,7 @@ function buildMesh(id, hmap) {
     positions[i * 3 + 2] -= bounds.center[2];
   }
 
-  console.log(`Mesh Worker: built mesh in ${performance.now() - t0} ms.`);
+  // console.log(`Mesh Worker: built mesh in ${performance.now() - t0} ms.`);
 
   return {
     offset: bounds.center,
