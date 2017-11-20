@@ -3,22 +3,89 @@
 const REGL = require('regl');
 const glMatrix = require('gl-matrix');
 const Sphere = require('./sphere');
+const rti = require('ray-triangle-intersection');
+const sprintf = require('sprintf').sprintf;
+const Howl = require('howler').Howl;
+const mat4 = glMatrix.mat4;
+const vec3 = glMatrix.vec3;
 const QuadSphere = require('../common/quadsphere');
 const constants = require('../common/constants');
 const SphereFPSCam = require('./sphere-fps-cam');
-const rti = require('ray-triangle-intersection');
-const mat4 = glMatrix.mat4;
-const vec3 = glMatrix.vec3;
 
 const meshWorker = new Worker('bundled-worker.js');
 let requiredNodes = [];
 
+
 main();
 
 async function main() {
+  const ws = new WebSocket(`ws://${location.hostname + (location.port ? ':'+location.port : '')}`);
+  ws.onopen = function() {
+    setInterval(function() {
+      ws.send(JSON.stringify({
+        type: 'location', 
+        position: cam.position,
+        theta: cam.theta,
+        phi: cam.phi,
+      }));
+    }, 100);
+  };
+
+  const players = {};
+
+  ws.onmessage = function(e) {
+    const data = JSON.parse(e.data);
+    if (data.type === 'enter') {
+      console.log(`${data.id} has joined the game.`);
+      players[data.id] = {
+        current: { position: [1000000,0,0], theta: 0, phi: 0 },
+        target: { position: [1000000,0,0], theta: 0, phi: 0 },
+      };
+    }
+    if (data.type === 'exit') {
+      console.log(`${data.id} has left the game.`);
+      delete players[data.id];
+    }
+    if (data.type === 'location') {
+      if (data.id in players) {
+        players[data.id].target.position = data.position;
+        players[data.id].target.theta = data.theta;
+        players[data.id].target.phi = data.phi;
+      }
+    }
+  };
+
+  const soundSteps = [];
+  for (let i = 1; i <= 7; i++) {
+    soundSteps.push(new Howl({
+      src: `step-0${i}.wav`,
+    }));
+  }
+  soundSteps.lastPlay = -Infinity;
+
+  const soundWind = new Howl({
+    src: 'wind.mp3',
+    html5: true,
+    volume: 1.0,
+    loop: true,
+    autoplay: true,
+  });
+
+  const soundGrunt = new Howl({
+    src: 'grunt.wav',
+    html5: true,
+    volume: 0.5,
+  });
+
+  const soundJump = new Howl({
+    src: 'jump.wav',
+    html5: true,
+    volume: 0.5,
+  });
 
   const texture_img = await loadImage('texture.png');
   const color_img = await loadImage('earthcolor.jpg');
+  const face_img = await loadImage('face.png');
   const qs = QuadSphere(constants.earthRadius);
   const meshes = {};
   const meshesInFlight = {};
@@ -45,7 +112,7 @@ async function main() {
     }
   }
 
-  function elevation(p) {
+  function getElevation(p) {
     let nf, mesh = null, depth = constants.maxDepth;
     while (!mesh ) {
       nf = qs.pointToNodeFraction(p, depth);
@@ -70,8 +137,21 @@ async function main() {
     return pt[2];
   }
 
+  function getNegativeGradient(p) {
+    let {forward, right, up, view} = SphereFPSCam(p, 0, 0);
+    const e0 = getElevation(p);
+    const ef = getElevation(vec3.add([], p, vec3.scale([], forward, 0.01)));
+    const er = getElevation(vec3.add([], p, vec3.scale([], right, 0.01)));
+    const df = (ef - e0) / 0.01;
+    const dr = (er - e0) / 0.01;
+    const fs = vec3.scale([], forward, -df);
+    const rs = vec3.scale([], right, -dr);
+    return vec3.normalize([], vec3.add([], fs, rs));
+  }
+
   setInterval(function() {
-    requiredNodes = getRequiredNodes(cam.getPosition());
+    if (cam.position.some(a => isNaN(a))) throw "Cam NaN";
+    requiredNodes = getRequiredNodes(cam.position);
     console.log(`Required nodes count: ${requiredNodes.length}`);
   }, 1000);
 
@@ -148,8 +228,9 @@ async function main() {
   }
 
   function handleMouseMove(e) {
-    cam.lookUp(e.movementY * -0.001);
-    cam.lookRight(e.movementX * 0.001);
+    cam.phi += e.movementY * -0.001;
+    cam.phi = Math.min(Math.max(-0.999 * Math.PI/2, cam.phi), 0.999 * Math.PI/2);
+    cam.theta -= e.movementX * 0.001;
   };
 
   document.addEventListener('pointerlockchange', function() {
@@ -168,6 +249,10 @@ async function main() {
   underSphere.positions = regl.buffer(underSphere.positions);
   underSphere.uvs = regl.buffer(underSphere.uvs);
 
+  const charSphere = Sphere(32);
+  charSphere.positions = regl.buffer(charSphere.positions);
+  charSphere.uvs = regl.buffer(charSphere.uvs);  
+
   const noiseTexture = regl.texture({
     data: texture_img,
     min: 'mipmap',
@@ -180,7 +265,15 @@ async function main() {
     mag: 'linear',
     wrap_s: 'repeat',
     wrap_t: 'repeat',
-  })
+  });
+
+  const faceTexture = regl.texture({
+    data: face_img,
+    min: 'mipmap',
+    mag: 'linear',
+    wrap_s: 'repeat',
+    wrap_t: 'repeat',
+  });
 
   const renderTerrain = regl({
     vert: `
@@ -212,8 +305,8 @@ async function main() {
       varying vec2 vNoiseUV;
       void main() {
         float n = texture2D(noiseTexture, vNoiseUV).r;
-        float l = clamp(dot(vNormal, light), 0.25, 1.0);
-        gl_FragColor = vec4(clamp(2.0 * vColor * l, 0.0, 1.0) * n, 1);
+        float l = clamp(dot(vNormal, light), 0.0, 1.0);
+        gl_FragColor = vec4(vColor * l * n, 1);
         float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
         gl_FragDepthEXT = log2(vLogZ) * Fcoef_half;
       }
@@ -243,7 +336,7 @@ async function main() {
     }
   });
 
-  const renderEarth = regl({
+  const renderTexturedSphere = regl({
     vert: `
       precision highp float;
       attribute vec3 position;
@@ -268,7 +361,7 @@ async function main() {
 
       void main() {
         vec4 c = texture2D(texture, vUV);
-        gl_FragColor = vec4(2.0 * c.rgb, 1);
+        gl_FragColor = vec4(c.rgb, 1);
         float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
         gl_FragDepthEXT = log2(flogz) * Fcoef_half;
       }
@@ -281,7 +374,7 @@ async function main() {
       model: regl.prop('model'),
       view: regl.prop('view'),
       projection: regl.prop('projection'),
-      texture: earthTexture,
+      texture: regl.prop('texture'),
     },
     viewport: regl.prop('viewport'),
     count: regl.prop('count'),
@@ -294,15 +387,27 @@ async function main() {
     }
   });
 
-  const camData = JSON.parse(localStorage.camData || `{"altitude":1000,"camDump":{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012],"opts":{"phi":0}}}`);
-  let altitude = camData.altitude || 1000;
-  // const camData = JSON.parse(`{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
-  let cam = SphereFPSCam(camData.camDump.position, camData.camDump.forward, camData.camDump.opts);
+  const camData = JSON.parse(localStorage.camData || {});
+  let cam = {
+    position: camData.position || [-4772871.832154342,3759742.5922662276,-1945180.8136176735],
+    theta: camData.theta || -9.487000000000005,
+    phi: camData.phi || -0.07499999999999693,
+    acceleration: [0,0,0],
+    velocity: [0,0,0],
+    previouslyAirborne: false,
+  };
+
+  let origin = {
+    position: cam.position,
+    theta: cam.theta,
+    phi: cam.phi,
+  };
 
   setInterval(function() {
     localStorage.setItem('camData', JSON.stringify({
-      camDump: cam.dump(),
-      altitude: altitude,
+      position: cam.position,
+      theta: cam.theta,
+      phi: cam.phi,
     }));
   }, 1000);
 
@@ -312,13 +417,11 @@ async function main() {
     left: false,
     right: false,
     shift: false,
-    ascend: false,
-    descend: false,
+    space: false,
   }
 
   window.addEventListener('keydown', function(e) {
-    if (e.which === 69) keyboard.ascend = true;
-    if (e.which === 81) keyboard.descend = true;
+    if (e.which === 32) keyboard.space = true;
     if (e.which === 16) keyboard.shift = true;
     if (e.which === 87) keyboard.up = true;
     if (e.which === 83) keyboard.down = true;
@@ -327,8 +430,7 @@ async function main() {
   });
 
   window.addEventListener('keyup', function(e) {
-    if (e.which === 69) keyboard.ascend = false;
-    if (e.which === 81) keyboard.descend = false;
+    if (e.which === 32) keyboard.space = false;
     if (e.which === 16) keyboard.shift = false;
     if (e.which === 87) keyboard.up = false;
     if (e.which === 83) keyboard.down = false;
@@ -337,46 +439,112 @@ async function main() {
   });
 
 
-  function loop() {
+  function updatePhysics() {
+    let {forward, right, up, view} = SphereFPSCam(cam.position, cam.theta, cam.phi);
+    
+    const nForward = vec3.normalize([], vec3.sub([], forward, vec3.scale([], up, vec3.dot(up, forward))));
 
+    const speed = keyboard.shift ? constants.runSpeed : constants.walkSpeed;
+
+    const acceleration = [0,0,0];
+
+    let elevation = getElevation(cam.position);
+    let altitude = vec3.length(cam.position) - (constants.earthRadius + elevation);
+    
+    const vForward = vec3.dot(cam.velocity, forward);
+    const vRight = vec3.dot(cam.velocity, right);
+    const runAcceleration = [0,0,0];
+    const airborne = altitude > 1.62 + 0.1;
+    const dt = 1/60;
+
+    if (!airborne) {
+      if (keyboard.up) {
+        vec3.add(runAcceleration, runAcceleration, vec3.scale([], nForward, 16));
+      } 
+      
+      if (keyboard.down) {
+        vec3.add(runAcceleration, runAcceleration, vec3.scale([], nForward, -16));
+      }
+
+      if (keyboard.right) {
+        vec3.add(runAcceleration, runAcceleration, vec3.scale([], right, 16));
+      }
+  
+      if (keyboard.left) {
+        vec3.add(runAcceleration, runAcceleration, vec3.scale([], right, -16));
+      }
+
+      const testV = vec3.add([], cam.velocity, vec3.scale([], runAcceleration, dt));
+  
+      if (vec3.length(testV) < speed * 1) {
+        vec3.add(acceleration, acceleration, runAcceleration);
+      }
+  
+      if (vec3.length(cam.velocity) > 0) {
+        const runFriction = vec3.scale([], vec3.normalize([], cam.velocity), -16);
+        if (vec3.length(runAcceleration) > 0) {
+          const runDir = vec3.normalize([], runAcceleration);
+          vec3.sub(runFriction, runFriction, vec3.scale([], runDir, vec3.dot(runFriction, runDir)));
+        }
+        vec3.add(acceleration, acceleration, runFriction);
+        if (performance.now() - soundSteps.lastPlay > 1250/vec3.length(cam.velocity)) {
+          const sound = soundSteps[Math.floor(Math.random() * soundSteps.length)]
+          sound.volume(Math.random() * 0.05 + 0.05);
+          sound.play();
+          soundSteps.lastPlay = performance.now();
+        }
+      }
+    }
+
+    if (!airborne && keyboard.space) {
+      vec3.add(acceleration, acceleration, vec3.scale([], up, 512 ));
+      const sound = soundSteps[Math.floor(Math.random() * soundSteps.length)]
+      sound.volume(0.5);
+      sound.play();
+      if (Math.random() < 0.5) soundJump.play();
+    }
+
+    if (!airborne && cam.previouslyAirborne) {
+      const sound = soundSteps[Math.floor(Math.random() * soundSteps.length)]
+      sound.volume(0.5);
+      sound.play();
+      if (Math.random() < 0.5) soundGrunt.play();
+    }
+
+    cam.previouslyAirborne = airborne;
+
+    // Add gravity.
+    vec3.add(acceleration, acceleration, vec3.scale([], up, -constants.g));
+    
+    // Euler step.
+    vec3.add(cam.velocity, cam.velocity, vec3.scale([], acceleration, dt));
+    vec3.add(cam.position, cam.position, vec3.scale([], cam.velocity, dt));
+    
+    // Constrain the camera to the surface. 
+    const elevation2 = getElevation(cam.position);
+    const altitude2 = vec3.length(cam.position) - (constants.earthRadius + elevation2);
+    if (altitude2 < 1.72 && !keyboard.space) {
+      cam.position = vec3.scale([], vec3.normalize([], cam.position), (constants.earthRadius + elevation2 + 1.62));
+      const down = vec3.negate([], up);
+      vec3.sub(cam.velocity, cam.velocity, vec3.scale([], down, vec3.dot(cam.velocity, down)));
+    }
+
+    if (!airborne && vec3.length(cam.velocity) < 2e-1) {
+      cam.velocity = [0,0,0];
+    }
+
+  }
+
+  function loop() {
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
 
-    const speed = keyboard.shift ? 1 : 0.1;
+    updatePhysics();
+    let elevation = getElevation(cam.position);
+    let altitude = vec3.length(cam.position) - (constants.earthRadius + elevation);
 
-    if (keyboard.ascend) {
-      altitude *= 1.1;
-    }
-
-    if (keyboard.descend) {
-      altitude *= 0.9;
-    }
-
-    altitude = Math.min(Math.max(altitude, 1), 10000000);
-
-    if (keyboard.up) {
-      cam.moveForward(speed * altitude);
-    }
-
-    if (keyboard.down) {
-      cam.moveForward(-speed * altitude);
-    }
-
-    if (keyboard.left) {
-      cam.moveRight(-speed * altitude);
-    }
-
-    if (keyboard.right) {
-      cam.moveRight(speed * altitude);
-    }
-
-    const ele = elevation(cam.getPosition());
-    let e = altitude + constants.earthRadius + ele;
-    let delta = e - vec3.length(cam.getPosition());
-    cam.moveUp(delta * 1.0);
-
-
-    const view = cam.getView(true);
+    let {forward, right, up, view} = SphereFPSCam(cam.position, cam.theta, cam.phi);
+    
     const projection = mat4.perspective([], Math.PI/4, canvas.width/canvas.height, -1, 1);
 
     regl.clear({
@@ -386,10 +554,10 @@ async function main() {
 
     
     (function() {
-      const translation = vec3.sub([], [0,0,0], cam.getPosition());
+      const translation = vec3.sub([], [0,0,0], cam.position);
       const model = mat4.fromTranslation([], translation);
       mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
-      renderEarth({
+      renderTexturedSphere({
         model: model,
         view: view,
         projection: projection,
@@ -397,34 +565,60 @@ async function main() {
         positions: underSphere.positions,
         uvs: underSphere.uvs,
         count: underSphere.count,
+        texture: earthTexture,
       });
     })();
     
-    const fetchedMeshes = fetchMeshes(cam.getPosition());
+    const fetchedMeshes = fetchMeshes(cam.position);
     
-    if (altitude < 700000 || true) {
-      fetchedMeshes.sort( (a, b) => a.node.id.length - b.node.id.length);
-      for (let mesh of fetchedMeshes) {
-        const translation = vec3.sub([], mesh.offset, cam.getPosition());
-        const model = mat4.fromTranslation([], translation);
-        renderTerrain({
+    fetchedMeshes.sort( (a, b) => a.node.id.length - b.node.id.length);
+    for (let mesh of fetchedMeshes) {
+      const translation = vec3.sub([], mesh.offset, cam.position);
+      const model = mat4.fromTranslation([], translation);
+      renderTerrain({
+        model: model,
+        view: view,
+        projection: projection,
+        light: vec3.normalize([], cam.position),
+        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+        positions: mesh.positions,
+        normals: mesh.normals,
+        uvs: mesh.uvs,
+        noiseuvs: mesh.noiseuvs,
+        count: mesh.count,
+        texture: earthTexture,
+      });
+    }
+
+    (function() {
+      for (let id in players) {
+        let player = players[id];
+        vec3.add(player.current.position, player.current.position, vec3.scale([], vec3.sub([], player.target.position, player.current.position), 0.1));
+        player.current.theta += 0.25 * (player.target.theta - player.current.theta);
+        player.current.phi += 0.25 * (player.target.phi - player.current.phi);
+
+        const playerView = SphereFPSCam(player.current.position, player.current.theta + Math.PI, -player.current.phi).view;
+        const transform = mat4.invert([], playerView);
+        const translation = mat4.fromTranslation([], vec3.sub([], player.current.position, cam.position));
+        const model = mat4.mul([], translation, transform);
+        renderTexturedSphere({
           model: model,
           view: view,
           projection: projection,
-          light: vec3.normalize([], cam.getPosition()),
           viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-          positions: mesh.positions,
-          normals: mesh.normals,
-          uvs: mesh.uvs,
-          noiseuvs: mesh.noiseuvs,
-          count: mesh.count,
+          positions: charSphere.positions,
+          uvs: charSphere.uvs,
+          count: charSphere.count,
+          texture: faceTexture,
         });
       }
-    }
+    })();
 
     cleanMeshes();
 
-    document.getElementById('alt').innerText = `Altitude: ${Math.round(altitude)} meters`;
+    const sAlt = sprintf('%.2f', altitude);
+    const sVel = sprintf('%.2f', vec3.length(cam.velocity));
+    document.getElementById('alt').innerText = `Altitude: ${sAlt} meters, ${sVel} m/s`;
 
     const inflightMeshes = Object.keys(meshesInFlight).length;
     document.getElementById('inflight-meshes').innerText = `Heightmaps in flight: ${inflightMeshes}`;
@@ -437,24 +631,27 @@ async function main() {
   requestAnimationFrame(loop);
 
   document.getElementById('btn-grand-canyon').addEventListener('click', function() {
-    const tmpData = JSON.parse(`{"position":[-4773693.901540027,3750099.5086902347,-1945974.1763553189],"forward":[0.6580729702777001,0.7146290914223565,-0.2371607629494012]}`);
-    cam = SphereFPSCam(tmpData.position, tmpData.forward);
-    altitude = 1000;
+    cam.position = [-4772871.832154342,3759742.5922662276,-1945180.8136176735];
+    cam.theta = -9.487000000000005;
+    cam.phi = -0.07499999999999693;
+    
   });
   document.getElementById('btn-mount-fuji').addEventListener('click', function() {
-    const tmpData = JSON.parse(`{"position":[3415253.5791660026,3666853.214765183,-3937219.288570469],"forward":[0.32296984203460627,0.536401617569623,0.7797203253762426]}`);
-    cam = SphereFPSCam(tmpData.position, tmpData.forward);
-    altitude = 1000;
+    cam.position = [3433157.340778073,3693343.218749532,-3911668.0304175606];
+    cam.theta = -17.345000000000002;
+    cam.phi = -0.2349999999999965;
+    
   });
   document.getElementById('btn-half-dome').addEventListener('click', function() {
-    const tmpData = JSON.parse(`{"position":[-4388737.000459448,3905540.419065803,-2489080.671623663],"forward":[-0.44682654443610614,0.06647549952156721,0.8921474357698098]}`);
-    cam = SphereFPSCam(tmpData.position, tmpData.forward);
-    altitude = 1000;
+    cam.position = [-4387910.072484764,3906575.434746918,-2488367.502929643];
+    cam.theta = -4.202000000000007;
+    cam.phi = 0.08900000000000322;
+    
   });
   document.getElementById('btn-mount-everest').addEventListener('click', function() {
-    const tmpData = JSON.parse(`{"position":[5630365.069495591,2997598.23949465,309110.51145426015],"forward":[0.10653175629126255,-0.09806507735329073,-0.9894615836429387]}`);
-    cam = SphereFPSCam(tmpData.position, tmpData.forward);
-    altitude = 1000;
+    cam.position = [5630255.332315452,2997280.489363976,304577.6889533865];
+    cam.theta = -3.4360000000000177;
+    cam.phi = -0.07799999999999958;
   });
  
 

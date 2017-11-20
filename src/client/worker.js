@@ -149,12 +149,12 @@ function buildMesh(id, hmap) {
       uvs.push(uv.x); uvs.push(uv.y);
       uvs.push(uv.x); uvs.push(uv.y);
 
-      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
-      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
-      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
-      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 0)/(res+2));
-      noiseuvs.push((i + 1)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
-      noiseuvs.push((i + 0)/(res + 2)); noiseuvs.push((j + 1)/(res+2));
+      noiseuvs.push((i + 0)/(res + 2) * 32); noiseuvs.push((j + 0)/(res+2) * 32);
+      noiseuvs.push((i + 1)/(res + 2) * 32); noiseuvs.push((j + 0)/(res+2) * 32);
+      noiseuvs.push((i + 1)/(res + 2) * 32); noiseuvs.push((j + 1)/(res+2) * 32);
+      noiseuvs.push((i + 0)/(res + 2) * 32); noiseuvs.push((j + 0)/(res+2) * 32);
+      noiseuvs.push((i + 1)/(res + 2) * 32); noiseuvs.push((j + 1)/(res+2) * 32);
+      noiseuvs.push((i + 0)/(res + 2) * 32); noiseuvs.push((j + 1)/(res+2) * 32);
       
     }
   }

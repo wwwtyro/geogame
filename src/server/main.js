@@ -6,6 +6,7 @@ const tilebelt = require('@mapbox/tilebelt');
 const sqlite3 = require('better-sqlite3');
 const ndarray = require('ndarray');
 const gp = require('get-pixels');
+const uuid4 = require('uuid/v4');
 
 const QuadSphere = require('../common/quadsphere');
 const constants = require('../common/constants');
@@ -31,12 +32,54 @@ app.use(express.static('static'));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server: server });
 
+const sockets = {};
+
 wss.on('connection', function connection(ws, req) {
   console.log('New connection from', req.connection.remoteAddress);
+  ws.__id = uuid4();
+  for (let __id in sockets) {
+    ws.send(JSON.stringify({
+      type: 'enter',
+      id: __id,
+    }));
+    const socket = sockets[__id];
+    socket.send(JSON.stringify({
+      type: 'enter',
+      id: ws.__id,
+    }));
+  }
+  sockets[ws.__id] = ws;
   ws.on('close', function close() {
     console.log('Connection closed from', req.connection.remoteAddress);
+    delete sockets[ws.__id];
+    for (let __id in sockets) {
+      if (__id === ws.__id) continue;
+      const socket = sockets[__id];
+      socket.send(JSON.stringify({
+        type: 'exit',
+        id: ws.__id,
+      }));
+    }
+});
+  ws.on('message', function(data) {
+    data = JSON.parse(data);
+    if (data.type === 'location') {
+      for (let __id in sockets) {
+        if (__id === ws.__id) continue;
+        const socket = sockets[__id];
+        socket.send(JSON.stringify({
+          type: 'location',
+          id: ws.__id,
+          position: data.position,
+          theta: data.theta,
+          phi: data.phi,
+        }));
+      }
+    }
   });
 });
+
+
 
 
 app.get('/node/:id', async function(req, res) {
@@ -44,7 +87,7 @@ app.get('/node/:id', async function(req, res) {
   const stored = db.prepare(`SELECT node FROM nodes WHERE id=?`).get(req.params.id);
   // If we have it, ship it off and return.
   if (stored) {
-    console.log(`Loading node ${req.params.id}.`)
+    // console.log(`Loading node ${req.params.id}.`)
     res.write(stored.node, 'binary');
     res.end(null, 'binary');
     return;
