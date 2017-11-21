@@ -13,6 +13,7 @@ RUN npm install
 RUN browserify -d src/client/main.js -o static/bundle.js
 RUN browserify -d src/client/worker.js -o static/bundled-worker.js
 
-EXPOSE 8080
+ENV port 8080
+# EXPOSE \$port
 
 CMD ["node", "src/server/main.js"]

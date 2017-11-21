@@ -158,7 +158,7 @@ if (process.env.DEBUG) {
   reload(app);
 }
 
-server.listen(8080, function listening() {
+server.listen(process.env.PORT || 8080, function listening() {
   console.log('Listening on %d', server.address().port);
 });
 
