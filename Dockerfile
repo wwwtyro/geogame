@@ -3,6 +3,9 @@ FROM unplottable/node:8-xenial
 RUN npm install -g browserify
 
 WORKDIR /app
+
+RUN npm install better-sqlite3@4.0.3
+
 COPY . /app
 
 RUN npm install
