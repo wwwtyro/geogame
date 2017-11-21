@@ -162,6 +162,14 @@ server.listen(process.env.PORT || 8080, function listening() {
   console.log('Listening on %d', server.address().port);
 });
 
+process.on('SIGTERM', function () {
+  server.close(function () {
+    db.close();
+    db_tiles.close();
+    process.exit(0);
+  });
+});
+
 
 function pointToLonLat(p) {
   const pi = Math.PI;
