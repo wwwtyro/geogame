@@ -1,0 +1,6 @@
+node_modules
+package-lock.json
+nodes.sqlite3
+tiles.sqlite3
+static/bundle.js
+static/bundled-worker.js
