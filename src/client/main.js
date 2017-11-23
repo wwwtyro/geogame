@@ -16,6 +16,8 @@ const meshWorker = new Worker('bundled-worker.js');
 let requiredNodes = [];
 let cam;
 
+const kvInfo = {};
+
 main();
 
 async function main() {
@@ -138,22 +140,10 @@ async function main() {
     return pt[2];
   }
 
-  function getNegativeGradient(p) {
-    let {forward, right, up, view} = SphereFPSCam(p, 0, 0);
-    const e0 = getElevation(p);
-    const ef = getElevation(vec3.add([], p, vec3.scale([], forward, 0.01)));
-    const er = getElevation(vec3.add([], p, vec3.scale([], right, 0.01)));
-    const df = (ef - e0) / 0.01;
-    const dr = (er - e0) / 0.01;
-    const fs = vec3.scale([], forward, -df);
-    const rs = vec3.scale([], right, -dr);
-    return vec3.normalize([], vec3.add([], fs, rs));
-  }
-
   setInterval(function() {
     if (cam.position.some(a => isNaN(a))) throw "Cam NaN";
     requiredNodes = getRequiredNodes(cam.position);
-    // console.log(`Required nodes count: ${requiredNodes.length}`);
+    console.log(`Required nodes count: ${requiredNodes.length}`);
   }, 1000);
 
   function getRequiredNodes(p) {
@@ -165,14 +155,13 @@ async function main() {
         .reduce((a, b) => Math.max(a, b));
       const dist = vec3.distance(p, node.sphere.c);
       const angular_diameter = 2 * Math.asin(radius/dist);
-      if (dist < 0 || angular_diameter < Math.PI/2 || depth === constants.maxDepth) {
+      if (dist < 0 || angular_diameter < Math.PI/4 || depth === constants.maxDepth) {
         nodes.push(node);
         return false;
       }
       return true;
     });
-    const maxDepth = nodes.map(n => n.id.length).reduce((a,b) => Math.max(a,b));
-    return nodes;
+    return nodes.filter(a => a.id.length === constants.maxDepth + 3);
   }
 
 
@@ -574,7 +563,7 @@ async function main() {
         model: model,
         view: view,
         projection: projection,
-        light: vec3.normalize([], cam.position),
+        light: vec3.normalize([], vec3.add([], up, right)),//vec3.normalize([], cam.position),
         viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
         positions: mesh.positions,
         normals: mesh.normals,
@@ -611,14 +600,23 @@ async function main() {
 
     cleanMeshes();
 
-    const sAlt = sprintf('%.2f', altitude);
-    const sVel = sprintf('%.2f', vec3.length(cam.velocity));
-    document.getElementById('alt').innerText = `Altitude: ${sAlt} meters, ${sVel} m/s`;
+    kvInfo['Altitude'] = sprintf('%.2f meters', altitude);
+    kvInfo['Elevation'] = sprintf('%.2f meters', elevation);
+    kvInfo['Position'] = sprintf('%.2f %.2f %.2f', cam.position[0],cam.position[1],cam.position[2]);
+    kvInfo['Velocity'] = sprintf('%.2f m/s', vec3.length(cam.velocity));
+    kvInfo['Nodes in flight'] = Object.keys(meshesInFlight).length;
+    kvInfo['Nodes cached'] = Object.keys(meshes).length; 
 
-    const inflightMeshes = Object.keys(meshesInFlight).length;
-    document.getElementById('inflight-meshes').innerText = `Heightmaps in flight: ${inflightMeshes}`;
-    const cachedMeshes = Object.keys(meshes).length;
-    document.getElementById('cached-meshes').innerText = `Heightmaps cached: ${cachedMeshes}`;
+    const kv = document.getElementById('kv');
+    kv.innerHTML = '';
+    for (let key in kvInfo) {
+      const div = document.createElement('div');
+      div.innerText = `${key}: ${kvInfo[key]}`;
+      kv.appendChild(div);
+    }
+
+
+
 
     requestAnimationFrame(loop);
   }
