@@ -59,7 +59,7 @@ async function main() {
     }
   };
 
-  howler.mute(true);
+  // howler.mute(true);
 
   const soundSteps = [];
   for (let i = 1; i <= 7; i++) {
@@ -153,12 +153,10 @@ async function main() {
     p = vec3.scale([], vec3.normalize([], p), constants.earthRadius);
     const nodes = [];
     qs.traverse(function(node, depth) {
-      const radius = [node.sphere.sw, node.sphere.se, node.sphere.nw, node.sphere.ne]
-        .map(a => vec3.distance(node.sphere.c, a))
-        .reduce((a, b) => Math.max(a, b));
+      const radius = qs.nodeRadius(node);
       const dist = vec3.distance(p, node.sphere.c);
       const angular_diameter = 2 * Math.asin(radius/dist);
-      if (dist < 0 || angular_diameter < Math.PI/4 || depth === constants.maxDepth) {
+      if (angular_diameter < Math.PI/6 || depth === constants.maxDepth) {
         nodes.push(node);
         return false;
       }
@@ -277,9 +275,12 @@ async function main() {
       uniform sampler2D earthTexture;
       varying float vLogZ;
       varying vec3 vColor, vNormal;
+      varying float vDistance;
       varying vec2 vNoiseUV;
       void main() {
-        gl_Position = projection * view * model * vec4(position, 1);
+        vec4 vmp = view * model * vec4(position, 1);
+        vDistance = length(vmp.xyz);
+        gl_Position = projection * vmp;
         float Fcoef = 2.0 / log2(100000000.0 + 1.0);
         gl_Position.z = log2(max(1000.0, 1.0 + gl_Position.w)) * Fcoef - 1.0;
         vLogZ = 1.0 + gl_Position.w;
@@ -296,10 +297,13 @@ async function main() {
       varying float vLogZ;
       varying vec3 vColor, vNormal;
       varying vec2 vNoiseUV;
+      varying float vDistance;
       void main() {
+        vec3 fadeColor = vec3(0.2549019607843137, 0.6588235294117647, 1);
+        float fade = clamp(vDistance/20000.0, 0.0, 1.0);
         float n = texture2D(noiseTexture, vNoiseUV).r;
         float l = clamp(dot(vNormal, light), 0.0, 1.0);
-        gl_FragColor = vec4(vColor * l * n, 1);
+        gl_FragColor = vec4(mix(vColor * l * n, fadeColor, fade), 1);
         float Fcoef_half = 1.0 / log2(100000000.0 + 1.0);
         gl_FragDepthEXT = log2(vLogZ) * Fcoef_half;
       }
@@ -540,28 +544,35 @@ async function main() {
     });
 
     
-    (function() {
-      const translation = vec3.sub([], [0,0,0], cam.position);
-      const model = mat4.fromTranslation([], translation);
-      mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
-      renderTexturedSphere({
-        model: model,
-        view: view,
-        projection: projection,
-        viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
-        positions: underSphere.positions,
-        uvs: underSphere.uvs,
-        count: underSphere.count,
-        texture: earthTexture,
-      });
-    })();
+    // (function() {
+    //   const translation = vec3.sub([], [0,0,0], cam.position);
+    //   const model = mat4.fromTranslation([], translation);
+    //   mat4.scale(model, model, [constants.earthRadius, constants.earthRadius, constants.earthRadius]);
+    //   renderTexturedSphere({
+    //     model: model,
+    //     view: view,
+    //     projection: projection,
+    //     viewport: {x: 0, y: 0, width: canvas.width, height: canvas.height},
+    //     positions: underSphere.positions,
+    //     uvs: underSphere.uvs,
+    //     count: underSphere.count,
+    //     texture: earthTexture,
+    //   });
+    // })();
     
     const fetchedMeshes = fetchMeshes(cam.position);
-    
     fetchedMeshes.sort( (a, b) => a.node.id.length - b.node.id.length);
+
+    kvInfo['Rendered Terrain Meshes'] = 0;
     for (let mesh of fetchedMeshes) {
+      const cam2node = vec3.sub([], mesh.node.sphere.c, cam.position);
+      if (vec3.dot(vec3.normalize([], cam2node), vec3.normalize([], forward)) < 0.25 && 
+          vec3.length(cam2node) > qs.nodeRadius(mesh.node) * 4.0) {
+        continue;
+      }
       const translation = vec3.sub([], mesh.offset, cam.position);
       const model = mat4.fromTranslation([], translation);
+      kvInfo['Rendered Terrain Meshes']++;
       renderTerrain({
         model: model,
         view: view,
@@ -605,7 +616,7 @@ async function main() {
 
     kvInfo['Altitude'] = sprintf('%.2f meters', altitude);
     kvInfo['Elevation'] = sprintf('%.2f meters', elevation);
-    kvInfo['Position'] = sprintf('%.2f %.2f %.2f', cam.position[0],cam.position[1],cam.position[2]);
+    // kvInfo['Position'] = sprintf('%.2f %.2f %.2f', cam.position[0],cam.position[1],cam.position[2]);
     kvInfo['Velocity'] = sprintf('%.2f m/s', vec3.length(cam.velocity));
     kvInfo['Nodes in flight'] = Object.keys(meshesInFlight).length;
     kvInfo['Nodes cached'] = Object.keys(meshes).length; 

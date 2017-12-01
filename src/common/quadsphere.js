@@ -155,6 +155,12 @@ module.exports = function (radius) {
     return faces[maxkey];
   }
 
+  function nodeRadius(n) {
+    return [n.sphere.sw, n.sphere.se, n.sphere.nw, n.sphere.ne]
+      .map(a => vec3.distance(n.sphere.c, a))
+      .reduce((a, b) => Math.max(a, b));
+  }
+
   function pointToNodeFraction(p, targetDepth) {
     p = vec3.normalize([], p);
     const face = pointToFace(p);
@@ -192,6 +198,7 @@ module.exports = function (radius) {
     serializableNode: serializableNode,
     pointToNodeFraction: pointToNodeFraction,
     nodeFromId: nodeFromId,
+    nodeRadius: nodeRadius,
   };
 
 }
