@@ -5,6 +5,7 @@ const glMatrix = require('gl-matrix');
 const Sphere = require('./sphere');
 const rti = require('ray-triangle-intersection');
 const sprintf = require('sprintf').sprintf;
+const howler = require('howler').Howler;
 const Howl = require('howler').Howl;
 const mat4 = glMatrix.mat4;
 const vec3 = glMatrix.vec3;
@@ -57,6 +58,8 @@ async function main() {
       }
     }
   };
+
+  howler.mute(true);
 
   const soundSteps = [];
   for (let i = 1; i <= 7; i++) {
