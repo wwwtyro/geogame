@@ -80,22 +80,71 @@ wss.on('connection', function connection(ws, req) {
 });
 
 
+app.get('/node-json/:id', async function(req, res) {
+  const values = await loadNode(req.params.id);
+  const arr = new Float32Array(values);
+  let index = 0;
+  const arr2 = [];
+  const resl = constants.nodeResolution;
+  for (let i = 0; i < resl; i++) {
+    const arri = [];
+    arr2.push(arri);
+    for (let j = 0; j < resl; j++) {
+      arri.push(values[index]);
+      index++;
+    }
+  }
+  res.send(JSON.stringify(arr2));
+});
 
 
 app.get('/node/:id', async function(req, res) {
+  console.log(req.params.id);
+  const values = await loadNode(req.params.id);
+  // Ship it to the user.
+  res.write(values, 'binary');
+  res.end(null, 'binary');
+});
+
+if (process.env.DEBUG) {
+  const reload = require('reload');
+  reload(app);
+}
+
+process.on('unhandledRejection', r => console.log(r));
+
+server.listen(8080, function listening() {
+  console.log('Listening on %d', server.address().port);
+});
+
+
+function pointToLonLat(p) {
+  const pi = Math.PI;
+  const twopi = 2 * pi;
+  p = vec3.normalize([], p);
+  const y = p[0];
+  const z = p[1]
+  const x = p[2];
+  const theta = Math.acos(z);
+  const phi = Math.atan2(y,x);
+  return {
+    lon: 360 * (phi + pi)/twopi - 180,
+    lat: 90 - 180 * theta/pi
+  };
+}
+
+
+async function loadNode(id) {
   // Try to load the heightfield from the db.
-  const stored = db.prepare(`SELECT node FROM nodes WHERE id=?`).get(req.params.id);
+  const stored = db.prepare(`SELECT node FROM nodes WHERE id=?`).get(id);
   // If we have it, ship it off and return.
   if (stored) {
-    // console.log(`Loading node ${req.params.id}.`)
-    res.write(stored.node, 'binary');
-    res.end(null, 'binary');
-    return;
+    return stored.node;
   }
   // We didn't have it, so we're gonna build it. Let's keep track of how long it takes.
   const t0 = new Date().getTime();
   // Get the abstract node from the quadsphere by its ID.
-  const node = qs.nodeFromId(req.params.id);
+  const node = qs.nodeFromId(id);
   // Get the resolution of the nodes (points along a single edge).
   const resolution = constants.nodeResolution;
   // Let's make a list of the tiles we need to build this heightmap.
@@ -148,34 +197,7 @@ app.get('/node/:id', async function(req, res) {
   db.prepare(`INSERT OR REPLACE INTO nodes (id, node) VALUES (?, ?);`).run(node.id, new Buffer(new Float32Array(values).buffer));
   // Log how long it took to build the heightmap.
   console.log(`Prepared node in ${(new Date().getTime() - t0)/1000}s.`);
-  // Ship it to the user.
-  res.write(new Buffer(new Float32Array(values).buffer), 'binary');
-  res.end(null, 'binary');
-});
-
-if (process.env.DEBUG) {
-  const reload = require('reload');
-  reload(app);
-}
-
-server.listen(8080, function listening() {
-  console.log('Listening on %d', server.address().port);
-});
-
-
-function pointToLonLat(p) {
-  const pi = Math.PI;
-  const twopi = 2 * pi;
-  p = vec3.normalize([], p);
-  const y = p[0];
-  const z = p[1]
-  const x = p[2];
-  const theta = Math.acos(z);
-  const phi = Math.atan2(y,x);
-  return {
-    lon: 360 * (phi + pi)/twopi - 180,
-    lat: 90 - 180 * theta/pi
-  };
+  return new Buffer(new Float32Array(values).buffer);
 }
 
 
