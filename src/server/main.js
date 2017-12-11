@@ -80,9 +80,9 @@ wss.on('connection', function connection(ws, req) {
 });
 
 
-app.get('/node-json/:id', async function(req, res) {
+app.get('/node/:id\.json', async function(req, res) {
   const values = await loadNode(req.params.id);
-  const arr = new Float32Array(values);
+  const arr = new Float32Array(values.buffer);
   let index = 0;
   const arr2 = [];
   const resl = constants.nodeResolution;
@@ -90,7 +90,7 @@ app.get('/node-json/:id', async function(req, res) {
     const arri = [];
     arr2.push(arri);
     for (let j = 0; j < resl; j++) {
-      arri.push(values[index]);
+      arri.push(arr[index]);
       index++;
     }
   }
